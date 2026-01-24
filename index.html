@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Church Hub — Home</title>
+  <meta name="theme-color" content="#16A34A" />
+  <style>
+    :root{
+      --bg:#f3fbf6;
+      --card:#ffffff;
+      --muted:#6b7280;
+      --text:#071028;
+      --accent:#16A34A;
+      --accent-2:#059669;
+      --radius:14px;
+      --shadow: 0 12px 36px rgba(6,8,15,0.06);
+      --max-width:920px;
+      --icon-size:64px;
+      --font:Inter,system-ui,Arial;
+    }
+    html,body{height:100%;margin:0;font-family:var(--font);background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased}
+    .wrap{max-width:var(--max-width);margin:16px auto;padding:12px}
+    header{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 8px}
+    h1{margin:0;font-size:20px}
+    .subtitle{color:var(--muted);font-size:13px}
+    .top-row{width:100%;display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:6px}
+    .lang{display:flex;gap:6px}
+    .lang button{border:0;background:transparent;padding:8px;border-radius:10px;cursor:pointer;font-weight:700;color:var(--muted)}
+    .lang button.active{background:linear-gradient(90deg,var(--accent),var(--accent-2));color:#fff;box-shadow:var(--shadow)}
+    .grid{display:grid;gap:12px;grid-template-columns:repeat(2,1fr);margin-top:12px}
+    @media(min-width:600px){.grid{grid-template-columns:repeat(3,1fr)}}
+    .tile{background:var(--card);border-radius:14px;padding:14px;display:flex;flex-direction:column;align-items:center;gap:10px;box-shadow:var(--shadow);text-decoration:none;color:inherit}
+    .icon-wrap{width:var(--icon-size);height:var(--icon-size);border-radius:16px;display:flex;align-items:center;justify-content:center}
+    .icon-circle{width:56px;height:56px;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800}
+    .label{font-weight:800;font-size:14px}
+    .sub{font-size:12px;color:var(--muted)}
+    .card{background:var(--card);border-radius:12px;padding:12px;box-shadow:var(--shadow);margin-top:12px;border:1px solid rgba(2,6,23,0.03)}
+    .list{display:flex;flex-direction:column;gap:8px}
+    .item{padding:10px;border-radius:10px;background:#fff;border:1px solid rgba(2,6,23,0.04)}
+    .muted{color:var(--muted);font-size:13px}
+    .attendance-controls{display:flex;gap:8px;align-items:center;margin-top:8px}
+    input[type="date"]{padding:10px;border-radius:10px;border:1px solid rgba(2,6,23,0.06)}
+    a.cta{display:inline-block;padding:8px 12px;border-radius:12px;background:linear-gradient(90deg,var(--accent),var(--accent-2));color:#fff;text-decoration:none;font-weight:700}
+    footer{margin-top:14px;text-align:center;color:var(--muted);font-size:13px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1 id="title">Church Hub</h1>
+      <div class="subtitle" id="desc">Accessible • English / Kiswahili • View-only</div>
+
+      <div class="top-row" role="toolbar" aria-label="Controls">
+        <div class="lang" aria-hidden="false">
+          <button id="langEn">EN</button>
+          <button id="langSw">SW</button>
+        </div>
+        <div>
+          <a class="cta" href="/prayers" id="goPrayers">Prayers</a>
+        </div>
+      </div>
+    </header>
+
+    <!-- Tiles -->
+    <section class="grid" aria-label="Hub">
+      <a class="tile" href="#membersCard" onclick="document.getElementById('membersCard').scrollIntoView({behavior:'smooth'})">
+        <div class="icon-wrap"><div class="icon-circle" style="background:linear-gradient(135deg,var(--accent),#0ea25a)">M</div></div>
+        <div class="label" data-i18n="members">Members</div>
+        <div class="sub" id="membersCount">—</div>
+      </a>
+
+      <a class="tile" href="#attendanceCard" onclick="document.getElementById('attendanceCard').scrollIntoView({behavior:'smooth'})">
+        <div class="icon-wrap"><div class="icon-circle" style="background:linear-gradient(135deg,#10b981,#059669)">A</div></div>
+        <div class="label" data-i18n="attendance">Attendance</div>
+        <div class="sub" id="attendanceSubtitle">By Sunday</div>
+      </a>
+
+      <a class="tile" href="#eventsCard" onclick="document.getElementById('eventsCard').scrollIntoView({behavior:'smooth'})">
+        <div class="icon-wrap"><div class="icon-circle" style="background:linear-gradient(135deg,#06b6d4,#0ea5a4)">E</div></div>
+        <div class="label" data-i18n="events">Events</div>
+        <div class="sub" id="eventsCount">—</div>
+      </a>
+
+      <a class="tile" href="#bibleCard" onclick="document.getElementById('bibleCard').scrollIntoView({behavior:'smooth'})">
+        <div class="icon-wrap"><div class="icon-circle" style="background:linear-gradient(135deg,#7c3aed,#06b6d4)">B</div></div>
+        <div class="label" data-i18n="bible">Bible Study</div>
+        <div class="sub" id="bibleCount">—</div>
+      </a>
+
+      <a class="tile" href="#summonsCard" onclick="document.getElementById('summonsCard').scrollIntoView({behavior:'smooth'})">
+        <div class="icon-wrap"><div class="icon-circle" style="background:linear-gradient(135deg,#ef4444,#f97316)">S</div></div>
+        <div class="label" data-i18n="summons">Announcements</div>
+        <div class="sub" id="summonsCount">—</div>
+      </a>
+
+      <a class="tile" href="#resourcesCard" onclick="document.getElementById('resourcesCard').scrollIntoView({behavior:'smooth'})">
+        <div class="icon-wrap"><div class="icon-circle" style="background:linear-gradient(135deg,#0ea5a4,#06b6d4)">R</div></div>
+        <div class="label" data-i18n="resources">Resources</div>
+        <div class="sub" id="resourcesCount">—</div>
+      </a>
+    </section>
+
+    <!-- Sections -->
+    <section id="membersCard" class="card" aria-labelledby="membersTitle">
+      <h3 id="membersTitle">Members</h3>
+      <div class="muted">Read-only list (admins manage members).</div>
+      <div class="list" id="membersList" style="margin-top:10px"></div>
+    </section>
+
+    <section id="attendanceCard" class="card" aria-labelledby="attTitle">
+      <h3 id="attTitle">Attendance (by Sunday)</h3>
+      <div class="muted">Choose a date to view — admin marks attendance.</div>
+      <div class="attendance-controls">
+        <input type="date" id="viewDate" />
+        <button class="muted-btn" id="btnNearest">Nearest Sunday</button>
+      </div>
+      <div id="attendanceView" style="margin-top:10px"></div>
+    </section>
+
+    <section id="eventsCard" class="card">
+      <h3>Events</h3>
+      <div class="list" id="eventsList"></div>
+    </section>
+
+    <section id="bibleCard" class="card">
+      <h3>Bible Study</h3>
+      <div class="list" id="bibleList"></div>
+    </section>
+
+    <section id="summonsCard" class="card">
+      <h3>Announcements</h3>
+      <div class="list" id="summonsList"></div>
+    </section>
+
+    <section id="resourcesCard" class="card">
+      <h3>Resources</h3>
+      <div class="list" id="resourcesList"></div>
+    </section>
+
+    <section class="card" style="text-align:center">
+      <div class="muted">Want to send a prayer request? Use the Prayers page.</div>
+      <div style="margin-top:10px"><a class="cta" href="/prayers">Open Prayers</a></div>
+    </section>
+
+    <footer>© Church Hub — Local demo</footer>
+  </div>
+
+  <script>
+    // language labels (simple)
+    const T = {
+      en: {
+        title: 'Church Hub',
+        desc: 'Accessible • English / Kiswahili • View-only',
+        members: 'Members',
+        attendance: 'Attendance',
+        events: 'Events',
+        bible: 'Bible Study',
+        summons: 'Announcements',
+        resources: 'Resources'
+      },
+      sw: {
+        title: 'Kituo cha Kanisa',
+        desc: 'Inayopatikana • Kiingereza / Kiswahili • Kuangalia tu',
+        members: 'Waumini',
+        attendance: 'Mahudhurio',
+        events: 'Matukio',
+        bible: 'Masomo ya Biblia',
+        summons: 'Matangazo',
+        resources: 'Rasilimali'
+      }
+    };
+
+    function setLang(l){
+      localStorage.setItem('ch_lang', l);
+      document.getElementById('langEn').classList.toggle('active', l==='en');
+      document.getElementById('langSw').classList.toggle('active', l==='sw');
+      const m = T[l];
+      document.getElementById('title').textContent = m.title;
+      document.getElementById('desc').textContent = m.desc;
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        if(m[key]) el.textContent = m[key];
+      });
+    }
+    document.getElementById('langEn').addEventListener('click', ()=>setLang('en'));
+    document.getElementById('langSw').addEventListener('click', ()=>setLang('sw'));
+    setLang(localStorage.getItem('ch_lang') || 'en');
+
+    // utility
+    function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+    // fetch and render /api/public
+    async function loadPublic(){
+      try{
+        const r = await fetch('/api/public');
+        const j = await r.json();
+        // counts
+        document.getElementById('membersCount').textContent = (j.members||[]).length + ' members';
+        document.getElementById('eventsCount').textContent = (j.events||[]).length ? (j.events.length + ' upcoming') : 'No events';
+        document.getElementById('bibleCount').textContent = (j.bible||[]).length ? (j.bible.length + ' studies') : 'No studies';
+        document.getElementById('summonsCount').textContent = (j.summons||[]).length ? (j.summons.length + ' posts') : 'No announcements';
+        document.getElementById('resourcesCount').textContent = (j.resources||[]).length ? (j.resources.length + ' items') : 'No resources';
+
+        // members list
+        const membersList = document.getElementById('membersList');
+        const members = j.members || [];
+        if(!members.length) membersList.innerHTML = '<div class="muted">No members yet</div>';
+        else membersList.innerHTML = members.map(m => `<div class="item"><div><strong>${escapeHtml(m.name)}</strong><div class="muted">${escapeHtml(m.gender||'')}</div></div></div>`).join('');
+
+        // events
+        const eventsList = document.getElementById('eventsList');
+        eventsList.innerHTML = (j.events||[]).length ? j.events.map(e => `<div class="item"><strong>${escapeHtml(e.title)}</strong><div class="muted">${escapeHtml(e.date||'')} ${escapeHtml(e.location||'')}</div><div style="margin-top:6px">${escapeHtml(e.description||'')}</div></div>`).join('') : '<div class="muted">No events</div>';
+
+        // bible
+        const bibleList = document.getElementById('bibleList');
+        bibleList.innerHTML = (j.bible||[]).length ? j.bible.map(b => `<div class="item"><strong>${escapeHtml(b.title)}</strong><div class="muted">${escapeHtml(b.passage||'')}</div><div style="margin-top:6px">${escapeHtml(b.notes||'')}</div></div>`).join('') : '<div class="muted">No bible studies</div>';
+
+        // summons
+        const summonsList = document.getElementById('summonsList');
+        summonsList.innerHTML = (j.summons||[]).length ? j.summons.map(s => `<div class="item"><strong>${escapeHtml(s.title)}</strong><div style="margin-top:6px">${escapeHtml(s.body||'')}</div></div>`).join('') : '<div class="muted">No announcements</div>';
+
+        // resources
+        const resourcesList = document.getElementById('resourcesList');
+        resourcesList.innerHTML = (j.resources||[]).length ? j.resources.map(r => `<div class="item"><strong>${escapeHtml(r.title)}</strong>${r.url?`<div class="muted" style="margin-top:6px"><a href="${escapeHtml(r.url)}" target="_blank">${escapeHtml(r.url)}</a></div>`:''}</div>`).join('') : '<div class="muted">No resources</div>';
+
+        // prepare attendance default date and render
+        const viewDate = document.getElementById('viewDate');
+        if(!viewDate.value){
+          const d = new Date(); d.setDate(d.getDate() - d.getDay()); viewDate.value = d.toISOString().slice(0,10);
+        }
+        renderAttendance(j);
+      }catch(err){
+        console.error(err);
+        document.querySelectorAll('.list').forEach(el => { if(!el.innerHTML) el.innerHTML = '<div class="muted">Unable to load</div>'; });
+      }
+    }
+
+    function renderAttendance(publicData){
+      const d = document.getElementById('viewDate').value;
+      const attendance = publicData.attendance || {};
+      const day = attendance[d] || {};
+      const members = publicData.members || [];
+      const view = document.getElementById('attendanceView');
+      if(!members.length){ view.innerHTML = '<div class="muted">No members</div>'; return; }
+      view.innerHTML = members.map(m => {
+        const rec = day[m.id];
+        const status = rec ? (rec.status === 'present' ? 'Present' : 'Absent') : 'Not marked';
+        const edited = rec && rec.edited_at ? ' • edited: ' + escapeHtml(rec.edited_at) : '';
+        return `<div class="item"><strong>${escapeHtml(m.name)}</strong><div class="muted">${status}${edited}</div></div>`;
+      }).join('');
+    }
+
+    document.getElementById('viewDate').addEventListener('change', async ()=>{
+      try{ const r = await fetch('/api/public'); const j = await r.json(); renderAttendance(j); }catch(e){ console.warn(e); }
+    });
+
+    document.getElementById('btnNearest').addEventListener('click', ()=>{
+      const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() - d.getDay()); document.getElementById('viewDate').value = d.toISOString().slice(0,10);
+      // reload and render
+      loadPublic();
+    });
+
+    // initial load
+    loadPublic();
+    // refresh periodically in case admin posts updates
+    setInterval(loadPublic, 30_000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Church Hub — Admin</title>
+<meta name="theme-color" content="#0f5132" />
+<style>
+  :root{
+    --bg:#f3faf6; --card:#ffffff; --muted:#6b7280; --text:#071028;
+    --primary:#0f5132; --accent:#16A34A; --accent-2:#059669; --danger:#ef4444;
+    --shadow: 0 12px 36px rgba(6,8,15,0.08); --radius:14px; --gap:12px; --max:920px;
+    --tap:56px; --font:Inter,system-ui,Arial;
+  }
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:var(--font);-webkit-font-smoothing:antialiased}
+  .wrap{max-width:var(--max);margin:12px auto;padding:12px}
+  header{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:12px}
+  .brand{display:flex;flex-direction:column;align-items:center}
+  h1{margin:0;font-size:18px}
+  .subtitle{font-size:13px;color:var(--muted)}
+  .controls{display:flex;gap:8px;align-items:center}
+  .lang{display:flex;gap:6px}
+  .lang button{border:0;padding:8px;border-radius:8px;background:transparent;cursor:pointer}
+  .lang .active{background:var(--primary);color:#fff}
+
+  /* mobile-first single column, then two column on wide screens */
+  .main{display:grid;grid-template-columns:1fr;gap:12px;margin-top:12px}
+  @media(min-width:920px){ .main{grid-template-columns:320px 1fr} }
+
+  .panel{background:var(--card);border-radius:var(--radius);padding:12px;box-shadow:var(--shadow);border:1px solid rgba(2,6,23,0.04)}
+  .muted{color:var(--muted);font-size:13px}
+  input,textarea,select,button{font-size:15px;padding:12px;border-radius:10px;border:1px solid rgba(2,6,23,0.06);box-sizing:border-box}
+  button{background:linear-gradient(90deg,var(--accent),var(--accent-2));color:#fff;border:0;font-weight:700;cursor:pointer}
+  .muted-btn{background:transparent;border:1px solid rgba(2,6,23,0.06);padding:10px;border-radius:10px}
+  .list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+  .item{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;padding:10px;border-radius:10px;background:#fff;border:1px solid rgba(2,6,23,0.04)}
+  .label{font-weight:700}
+  .row{display:flex;gap:8px}
+  .col{flex:1}
+  .pill{display:inline-block;padding:6px 10px;border-radius:999px;background:#eef7ef;color:#065f46;font-weight:700}
+  .danger{background:var(--danger);color:#fff}
+  textarea{min-height:90px}
+  .small{font-size:13px}
+  .icon-btn{width:44px;height:44px;border-radius:10px;border:0;background:var(--card);box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center}
+  .hidden{display:none}
+  footer{margin-top:12px;text-align:center;color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<link rel="manifest" href="/manifest.json">
+
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js')
+    .then(() => console.log("Service Worker registered"))
+    .catch(err => console.error("SW failed", err));
+}
+</script>
+
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <h1 id="brandTitle">Church Hub — Admin</h1>
+        <div class="subtitle" id="brandSubtitle">Mobile-first • Calm green • Admin controls</div>
+      </div>
+      <div class="controls">
+        <div class="lang" aria-hidden="false">
+          <button id="langEn">EN</button>
+          <button id="langSw">SW</button>
+        </div>
+        <button id="logoutBtn" class="muted-btn hidden">Logout</button>
+      </div>
+    </header>
+
+    <!-- AUTH / DASHBOARD container -->
+    <div id="authWrap" style="margin-top:12px">
+      <div id="registerPanel" class="panel" style="display:none">
+        <strong id="regTitle">Create first admin</strong>
+        <div class="muted small" style="margin-top:6px">Create the initial admin account — passwords are hashed.</div>
+        <div style="margin-top:10px;display:grid;gap:8px">
+          <input id="regName" placeholder="Full name" />
+          <input id="regPass" placeholder="Password" type="password" />
+          <div style="display:flex;gap:8px">
+            <button id="btnRegister">Create admin</button>
+            <button id="btnShowLogin" class="muted-btn">Login instead</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="loginPanel" class="panel" style="display:none">
+        <strong id="loginTitle">Admin login</strong>
+        <div class="muted small" style="margin-top:6px">Sign in to manage members, attendance and content</div>
+        <div style="margin-top:10px;display:grid;gap:8px">
+          <input id="loginName" placeholder="Admin name" />
+          <input id="loginPass" placeholder="Password" type="password" />
+          <div style="display:flex;gap:8px">
+            <button id="btnLogin">Login</button>
+            <button id="btnShowRegister" class="muted-btn">Register (first admin)</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="dashboard" class="main hidden">
+      <!-- LEFT COLUMN: members, attendance, admins -->
+      <div>
+        <div class="panel">
+          <strong id="membersH">Members</strong>
+          <div class="muted small">Add members (name + gender). Members show in public index.</div>
+          <div style="margin-top:10px;display:grid;gap:8px">
+            <div class="row">
+              <input id="memberName" class="col" placeholder="Full name" />
+              <select id="memberGender" style="width:110px">
+                <option value="">Gender</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+              </select>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button id="btnAddMember">Add member</button>
+              <button id="btnRefreshMembers" class="muted-btn">Refresh</button>
+            </div>
+          </div>
+          <div class="list" id="membersList"></div>
+        </div>
+
+        <div class="panel" style="margin-top:12px">
+          <strong id="attH">Attendance</strong>
+          <div class="muted small">Mark Present / Absent per Sunday. Edits timestamped.</div>
+          <div style="margin-top:10px;display:grid;gap:8px">
+            <input type="date" id="attDate" />
+            <div style="display:flex;gap:8px">
+              <button id="btnLoadAttendance" class="muted-btn">Load</button>
+              <button id="btnToday" class="muted-btn">This Sunday</button>
+            </div>
+          </div>
+          <div class="list" id="attendanceList"></div>
+        </div>
+
+        <div class="panel" style="margin-top:12px">
+          <strong>Admins</strong>
+          <div class="muted small">Add additional admins (requires admin session)</div>
+          <div style="margin-top:8px;display:grid;gap:8px">
+            <div class="row"><input id="newAdminName" class="col" placeholder="Name" /><input id="newAdminPass" placeholder="Password" type="password" style="width:150px" /></div>
+            <div style="display:flex;gap:8px"><button id="btnAddAdmin">Add admin</button><button id="btnListAdmins" class="muted-btn">List</button></div>
+          </div>
+          <div class="list" id="adminsList"></div>
+        </div>
+      </div>
+
+      <!-- RIGHT COLUMN: content & prayers & staff -->
+      <div>
+        <div class="panel">
+          <strong>Post content</strong>
+          <div class="muted small">Post Bible study, Events, Announcements (summons), or Resources for the public index.</div>
+          <div style="margin-top:10px;display:grid;gap:8px">
+            <input id="contentTitleInput" placeholder="Title" />
+            <input id="contentSubInput" placeholder="Date / Passage / Location / URL" />
+            <textarea id="contentNotesInput" placeholder="Notes / Description"></textarea>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button id="btnPostBible">Post Bible study</button>
+              <button id="btnPostEvent" style="background:#3b82f6">Post event</button>
+              <button id="btnPostSummon" style="background:#ef4444">Post announcement</button>
+              <button id="btnPostResource" style="background:#0ea5a4">Add resource</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top:12px">
+          <strong>Donations</strong>
+          <div class="muted small">Add donation records quickly.</div>
+          <div style="margin-top:8px;display:flex;gap:8px">
+            <input id="donorName" class="col" placeholder="Donor" />
+            <input id="donAmount" placeholder="Amount" style="width:140px" />
+            <div style="width:120px"><button id="btnAddDonation">Add</button></div>
+          </div>
+          <div class="list" id="donationsList"></div>
+        </div>
+
+        <div class="panel" style="margin-top:12px">
+          <strong>Prayer Requests (Inbox)</strong>
+          <div class="muted small">Reply to prayer requests; replies appear on the public prayers page.</div>
+          <div class="list" id="prayersList"></div>
+        </div>
+
+        <!-- People in charge / staff panel -->
+        <div class="panel" style="margin-top:12px">
+          <strong>People in charge</strong>
+          <div class="muted small">Add staff / pastors (they are not full admins). Assign permissions for what they can do.</div>
+
+          <div style="margin-top:8px;display:grid;gap:8px">
+            <div class="row">
+              <input id="staffName" class="col" placeholder="Name (e.g., Pastor John)" />
+              <input id="staffPass" placeholder="Password" type="password" style="width:140px" />
+            </div>
+            <input id="staffContact" placeholder="Contact (phone or email) — optional" />
+
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <select id="staffRole" style="width:180px">
+                <option value="">Role (optional)</option>
+                <option>Pastor</option>
+                <option>Coordinator</option>
+                <option>Deacon</option>
+              </select>
+
+              <label class="small"><input type="checkbox" id="perm_reply" /> Reply prayers</label>
+              <label class="small"><input type="checkbox" id="perm_view_members" /> View members</label>
+              <label class="small"><input type="checkbox" id="perm_add_don" /> Add donations</label>
+              <label class="small"><input type="checkbox" id="perm_post_content" /> Post content</label>
+            </div>
+
+            <div style="display:flex;gap:8px;margin-top:6px">
+              <button id="btnAddStaff">Add person in charge</button>
+              <button id="btnListStaff" class="muted-btn">List</button>
+            </div>
+          </div>
+
+          <div class="list" id="staffList" style="margin-top:10px"></div>
+        </div>
+
+      </div>
+    </div>
+
+    <footer>© Church Hub — Local demo</footer>
+  </div>
+
+<script>
+// Lightweight admin front-end (mobile-first). Uses same endpoints in your app.py.
+const api = async (path, opts={}) => {
+  opts.credentials = 'same-origin';
+  if(opts.body && typeof opts.body === 'object'){
+    opts.headers = opts.headers || {}; opts.headers['Content-Type']='application/json'; opts.body = JSON.stringify(opts.body);
+  }
+  const res = await fetch(path, opts);
+  const txt = await res.text(); try{ return JSON.parse(txt); }catch(e){ return txt; }
+};
+
+function toast(msg, t=1800){ const id='__toast__'; let el=document.getElementById(id); if(!el){ el=document.createElement('div'); el.id=id; el.style.position='fixed'; el.style.right='14px'; el.style.bottom='14px'; el.style.padding='10px 12px'; el.style.background='#071028'; el.style.color='white'; el.style.borderRadius='10px'; document.body.appendChild(el);} el.textContent=msg; el.style.display='block'; setTimeout(()=>el.style.display='none',t);} 
+
+// i18n buttons
+const T={ en: {}, sw: {} };
+document.getElementById('langEn').addEventListener('click', ()=>{ localStorage.setItem('ch_lang','en'); document.getElementById('langEn').classList.add('active'); document.getElementById('langSw').classList.remove('active'); });
+document.getElementById('langSw').addEventListener('click', ()=>{ localStorage.setItem('ch_lang','sw'); document.getElementById('langSw').classList.add('active'); document.getElementById('langEn').classList.remove('active'); });
+if(localStorage.getItem('ch_lang')==='sw') document.getElementById('langSw').classList.add('active'); else document.getElementById('langEn').classList.add('active');
+
+// AUTH flow (register first admin if missing)
+async function adminExists(){ try{ const r = await fetch('/api/admin/exists'); const j = await r.json(); return j.exists; }catch(e){ return true; } }
+async function boot(){ const exists = await adminExists(); if(!exists){ document.getElementById('registerPanel').style.display='block'; document.getElementById('loginPanel').style.display='none'; } else { document.getElementById('loginPanel').style.display='block'; document.getElementById('registerPanel').style.display='none'; } }
+
+// register/login
+document.getElementById('btnShowLogin').addEventListener('click', ()=>{ document.getElementById('registerPanel').style.display='none'; document.getElementById('loginPanel').style.display='block'; });
+document.getElementById('btnShowRegister').addEventListener('click', ()=>{ document.getElementById('registerPanel').style.display='block'; document.getElementById('loginPanel').style.display='none'; });
+
+document.getElementById('btnRegister').addEventListener('click', async ()=>{
+  const name=document.getElementById('regName').value.trim(); const pass=document.getElementById('regPass').value;
+  if(!name||!pass){ toast('name & password'); return; }
+  try{ const j=await api('/api/admin/register',{method:'POST', body:{name, password: pass}}); afterLogin(j.admin.name); toast('admin created'); }catch(e){ console.error(e); toast(e.error||'register failed'); }
+});
+
+document.getElementById('btnLogin').addEventListener('click', async ()=>{
+  const name=document.getElementById('loginName').value.trim(); const pass=document.getElementById('loginPass').value;
+  if(!name||!pass){ toast('name & password'); return; }
+  try{ const j=await api('/api/admin/login',{method:'POST', body:{name, password: pass}}); afterLogin(j.admin.name); toast('welcome'); }catch(e){ console.error(e); toast(e.error||'login failed'); }
+});
+
+document.getElementById('logoutBtn').addEventListener('click', async ()=>{ try{ await api('/api/admin/logout',{method:'POST'}); location.reload(); }catch(e){ location.reload(); } });
+
+function afterLogin(name){ document.getElementById('authWrap').style.display='none'; document.getElementById('dashboard').classList.remove('hidden'); document.getElementById('logoutBtn').classList.remove('hidden'); refreshAll(); }
+
+// MEMBERS
+async function loadMembers(){ try{ const j = await api('/api/admin/members'); const el=document.getElementById('membersList'); el.innerHTML = j.length? j.map(m=>`<div class="item"><div><div class="label">${escape(m.name)}</div><div class="muted">${m.gender||''}</div></div><div><button class="muted-btn" onclick="removeMember('${m.id}')">Remove</button></div></div>`).join(''):'<div class="muted">No members yet</div>'; }catch(e){ console.warn(e); try{ const pub = await api('/api/public'); const members=pub.members||[]; document.getElementById('membersList').innerHTML = members.length? members.map(m=>`<div class="item"><div><div class="label">${escape(m.name)}</div><div class="muted">${m.gender||''}</div></div></div>`).join('') : '<div class="muted">No members yet</div>'; }catch(ee){ document.getElementById('membersList').innerHTML = '<div class="muted">Unable to load</div>'; } } }
+
+document.getElementById('btnAddMember').addEventListener('click', async ()=>{ const name=document.getElementById('memberName').value.trim(); const gender=document.getElementById('memberGender').value; if(!name){ toast('enter name'); return; } try{ await api('/api/admin/members',{method:'POST', body:{name, gender}}); document.getElementById('memberName').value=''; document.getElementById('memberGender').value=''; toast('added'); await loadMembers(); await loadAttendance(); }catch(e){ console.error(e); toast(e.error||'failed'); } });
+
+window.removeMember = async function(id){ if(!confirm('Remove?')) return; try{ await api('/api/admin/members',{method:'DELETE', body:{id}}); toast('removed'); await loadMembers(); await loadAttendance(); }catch(e){ console.error(e); toast(e.error||'failed'); } };
+
+// ATTENDANCE
+function nearestSunday(){ const d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-d.getDay()); return d.toISOString().slice(0,10);} 
+document.getElementById('btnToday').addEventListener('click', ()=>{ document.getElementById('attDate').value = nearestSunday(); loadAttendance(); });
+document.getElementById('btnLoadAttendance').addEventListener('click', loadAttendance);
+
+async function loadAttendance(){ try{ let members; try{ members = await api('/api/admin/members'); }catch(e){ const pub = await api('/api/public'); members = pub.members || []; }
+    const pub = await api('/api/public'); const map = pub.attendance || {}; const date = document.getElementById('attDate').value || nearestSunday(); document.getElementById('attDate').value = date; const day = map[date] || {};
+    const html = members.length? members.map(m=>{ const rec = day[m.id]; const status = rec? (rec.status==='present'? 'present':'absent'):'not marked'; const edited = rec && rec.edited_at?` • edited ${rec.edited_at}`:''; return `<div class="item"><div><div class="label">${escape(m.name)}</div><div class="muted">${m.gender||''} • ${status}${edited}</div></div><div style="display:flex;gap:8px"><button onclick="setAttendance('${date}','${m.id}','present')" style="background:#10b981">Present</button><button onclick="setAttendance('${date}','${m.id}','absent')" style="background:#ef4444">Absent</button></div></div>` }).join('') : '<div class="muted">No members</div>';
+    document.getElementById('attendanceList').innerHTML = html;
+  }catch(e){ console.error(e); document.getElementById('attendanceList').innerHTML = '<div class="muted">Unable to load</div>'; }
+}
+
+async function setAttendance(date,id,status){ try{ await api('/api/admin/attendance',{ method:'POST', body:{ date, id, status }}); toast('saved'); await loadAttendance(); }catch(e){ console.error(e); toast(e.error||'failed'); } }
+
+// CONTENT posting
+async function postContent(kind){ const title=document.getElementById('contentTitleInput').value.trim(); const sub=document.getElementById('contentSubInput').value.trim(); const notes=document.getElementById('contentNotesInput').value.trim(); if(!title) return toast('Title required'); try{ if(kind==='bible') await api('/api/admin/bible',{method:'POST', body:{title, passage:sub, notes}}); if(kind==='event') await api('/api/admin/events',{method:'POST', body:{title, date:sub, location:'', description:notes}}); if(kind==='summon') await api('/api/admin/summons',{method:'POST', body:{title, body:notes}}); if(kind==='resource') await api('/api/admin/resources',{method:'POST', body:{title, url:sub}}); toast('Posted'); document.getElementById('contentTitleInput').value=''; document.getElementById('contentSubInput').value=''; document.getElementById('contentNotesInput').value=''; }catch(e){ console.error(e); toast(e.error||'failed'); } }
+
+document.getElementById('btnPostBible').addEventListener('click', ()=>postContent('bible'));
+document.getElementById('btnPostEvent').addEventListener('click', ()=>postContent('event'));
+document.getElementById('btnPostSummon').addEventListener('click', ()=>postContent('summon'));
+document.getElementById('btnPostResource').addEventListener('click', ()=>postContent('resource'));
+
+// DONATIONS
+document.getElementById('btnAddDonation').addEventListener('click', async ()=>{ const name=document.getElementById('donorName').value.trim()||'Anonymous'; const amount=parseFloat(document.getElementById('donAmount').value)||0; if(!amount) return toast('amount'); try{ await api('/api/admin/donations',{method:'POST', body:{name, amount}}); document.getElementById('donorName').value=''; document.getElementById('donAmount').value=''; toast('Donation added'); await loadDonations(); }catch(e){ console.error(e); toast(e.error||'failed'); } });
+async function loadDonations(){ try{ const j = await api('/api/admin/donations'); const el=document.getElementById('donationsList'); el.innerHTML = j.length? j.map(d=>`<div class="item"><div><div class="label">${escape(d.name)}</div><div class="muted">KES ${escape(String(d.amount))}</div></div></div>`).join('') : '<div class="muted">No donations</div>'; }catch(e){ console.warn(e); document.getElementById('donationsList').innerHTML = '<div class="muted">Unable to load</div>'; } }
+
+// PRAYERS inbox
+async function loadPrayers(){ try{ const j = await api('/api/prayers'); const el=document.getElementById('prayersList'); el.innerHTML = j.length? j.map(p=>`<div class="item"><div style="flex:1"><div class="label">${escape(p.name)}</div><div class="muted">${escape(p.created_at||'')}</div><div style="margin-top:8px">${escape(p.body)}</div>${p.reply?`<div style="margin-top:8px;color:#065f46"><strong>Reply:</strong> ${escape(p.reply)}</div>`:`<div style="margin-top:8px"><textarea id="reply_${p.id}" rows="2" placeholder="Write reply..."></textarea><div style="display:flex;gap:8px;margin-top:6px"><button onclick="replyPrayer('${p.id}')">Reply</button><button onclick="markAnswered('${p.id}')">Mark answered</button></div></div>`}</div></div>`).join('') : '<div class="muted">No prayers</div>'; }catch(e){ console.warn(e); document.getElementById('prayersList').innerHTML = '<div class="muted">Unable to load prayers</div>'; } }
+
+async function replyPrayer(id){ const txt = document.getElementById('reply_'+id).value.trim(); if(!txt) return toast('type reply'); try{ await api('/api/admin/prayers/'+id+'/reply',{method:'POST', body:{reply:txt, status:'answered'}}); toast('Replied'); await loadPrayers(); }catch(e){ console.error(e); toast(e.error||'failed'); } }
+async function markAnswered(id){ if(!confirm('Mark answered?')) return; try{ await api('/api/admin/prayers/'+id+'/reply',{method:'POST', body:{reply:'Marked answered', status:'answered'}}); toast('Marked'); await loadPrayers(); }catch(e){ console.error(e); toast(e.error||'failed'); } }
+
+// ADMINS list/add
+document.getElementById('btnAddAdmin').addEventListener('click', async ()=>{ const name=document.getElementById('newAdminName').value.trim(); const pass=document.getElementById('newAdminPass').value; if(!name||!pass) return toast('fill both'); try{ await api('/api/admin/add_admin',{method:'POST', body:{name, password: pass}}); document.getElementById('newAdminName').value=''; document.getElementById('newAdminPass').value=''; toast('admin added'); await loadAdmins(); }catch(e){ console.error(e); toast(e.error||'failed'); } });
+document.getElementById('btnListAdmins').addEventListener('click', loadAdmins);
+async function loadAdmins(){ try{ const j = await api('/api/admin/list_admins'); const el=document.getElementById('adminsList'); el.innerHTML = j.length? j.map(a=>`<div class="item"><div><div class="label">${escape(a.name)}</div><div class="muted">${escape(a.created_at||'')}</div></div></div>`).join('') : '<div class="muted">No admins</div>'; }catch(e){ console.warn(e); document.getElementById('adminsList').innerHTML = '<div class="muted">Unable to load admins</div>'; } }
+
+// STAFF management (admin-only)
+document.getElementById('btnAddStaff').addEventListener('click', async ()=>{
+  const name = document.getElementById('staffName').value.trim();
+  const password = document.getElementById('staffPass').value;
+  const contact = document.getElementById('staffContact').value.trim();
+  const role = document.getElementById('staffRole').value;
+  const perms = {
+    reply_prayers: !!document.getElementById('perm_reply').checked,
+    view_members: !!document.getElementById('perm_view_members').checked,
+    add_donations: !!document.getElementById('perm_add_don').checked,
+    post_content: !!document.getElementById('perm_post_content').checked
+  };
+  if(!name || !password) return toast('name & password');
+  try{
+    await api('/api/admin/staff', { method:'POST', body:{ name, password, role, perms, contact } });
+    document.getElementById('staffName').value=''; document.getElementById('staffPass').value=''; document.getElementById('staffRole').value=''; document.getElementById('staffContact').value='';
+    ['perm_reply','perm_view_members','perm_add_don','perm_post_content'].forEach(id=>document.getElementById(id).checked=false);
+    toast('Person added');
+    await loadStaff();
+  }catch(e){ console.error(e); toast(e.error||'failed'); }
+});
+
+document.getElementById('btnListStaff').addEventListener('click', loadStaff);
+
+async function loadStaff(){
+  try{
+    const j = await api('/api/admin/staff');
+    const el = document.getElementById('staffList');
+    el.innerHTML = j.length? j.map(s=>{
+      const contact = s.contact? `\n<div class="muted small">contact: ${escape(s.contact)}</div>` : '';
+      const perms = Object.keys(s.perms||{}).filter(k=>s.perms[k]).join(', ') || 'none';
+      return `<div class="item"><div><div class="label">${escape(s.name)} ${s.role?` • ${escape(s.role)}`:''}</div><div class="muted small">perms: ${escape(perms)}</div>${contact}</div><div><button class="muted-btn" onclick="removeStaff('${s.id}')">Remove</button></div></div>`
+    }).join('') : '<div class="muted">No people added</div>';
+  }catch(e){ console.warn(e); document.getElementById('staffList').innerHTML = '<div class="muted">Unable to load</div>'; }
+}
+window.removeStaff = async function(id){
+  if(!confirm('Remove this person?')) return;
+  try{
+    await api('/api/admin/staff', { method:'DELETE', body:{ id }});
+    toast('Removed');
+    await loadStaff();
+  }catch(e){ console.error(e); toast(e.error||'failed'); }
+}
+
+// UTIL & startup
+function escape(s){ return String(s||'').replace(/[&<>\"']/g, c => ({'&':'&amp;','<' :'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+async function refreshAll(){ await Promise.allSettled([loadMembers(), loadAttendance(), loadPrayers(), loadDonations(), loadAdmins(), loadStaff()]); }
+
+(async function init(){ try{ const r = await fetch('/api/admin/members', {credentials:'same-origin'}); if(r.status===200){ document.getElementById('authWrap').style.display='none'; document.getElementById('dashboard').classList.remove('hidden'); document.getElementById('logoutBtn').classList.remove('hidden'); refreshAll(); } else { document.getElementById('authWrap').style.display='block'; await boot(); } }catch(e){ document.getElementById('authWrap').style.display='block'; await boot(); } })();
+
+</script>
+</body>
+</html>

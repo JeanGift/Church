@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Church Hub — Prayers</title>
+<meta name="theme-color" content="#16A34A"/>
+<style>
+  :root{
+    --bg:#f7fff9;
+    --card:#ffffff;
+    --accent:#16A34A;
+    --accent-2:#059669;
+    --muted:#64748b;
+    --text:#042028;
+    --radius:12px;
+    --max:720px;
+    --font:Inter,system-ui,Arial;
+  }
+  html,body{height:100%;margin:0;font-family:var(--font);background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased}
+  .wrap{max-width:var(--max);margin:18px auto;padding:14px}
+  header{display:flex;justify-content:space-between;align-items:center;gap:12px}
+  h1{margin:0;font-size:20px}
+  .muted{color:var(--muted);font-size:13px}
+  .panel{background:var(--card);padding:14px;border-radius:var(--radius);box-shadow:0 10px 30px rgba(3,7,18,0.06);border:1px solid rgba(0,0,0,0.04);margin-top:12px}
+  input,textarea,select,button{width:100%;padding:12px;border-radius:10px;border:1px solid rgba(0,0,0,0.06);box-sizing:border-box;font-size:15px}
+  button{background:linear-gradient(90deg,var(--accent),var(--accent-2));color:#fff;border:0;font-weight:700;cursor:pointer}
+  .row{display:flex;gap:8px}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .staff-grid{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .staff-card{background:#f0fff6;border-radius:10px;padding:10px;border:1px solid rgba(2,6,23,0.04);min-width:160px;flex:1}
+  .label{font-weight:700}
+  .small{font-size:13px}
+  .list{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+  .item{padding:10px;border-radius:10px;background:#fff;border:1px solid rgba(0,0,0,0.04)}
+  footer{margin-top:18px;text-align:center;color:var(--muted);font-size:13px}
+  .lang{display:flex;gap:6px}
+  .lang button{border:0;background:transparent;padding:6px;border-radius:8px;cursor:pointer}
+  .lang button.active{background:var(--accent);color:#fff}
+  @media(max-width:640px){ .two{grid-template-columns:1fr} .staff-card{min-width:130px} }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1 id="title">Prayers</h1>
+        <div class="muted" id="subtitle">Submit a request; see replies from the admin</div>
+      </div>
+      <div class="lang" aria-hidden="false">
+        <button id="lngEn">EN</button>
+        <button id="lngSw">SW</button>
+      </div>
+    </header>
+
+    <!-- Staff / People in charge -->
+    <section class="panel" aria-labelledby="staffTitle">
+      <strong id="staffTitle">People in charge</strong>
+      <div class="muted small" id="staffDesc">Choose who you'd like to contact about your prayer (optional).</div>
+
+      <div class="staff-grid" id="staffGrid" style="margin-top:10px">
+        <!-- populated by JS -->
+      </div>
+    </section>
+
+    <!-- Prayer form -->
+    <section class="panel" aria-labelledby="formTitle">
+      <strong id="formTitle">Send a prayer request</strong>
+      <div class="muted small" id="formDesc">Your name is optional; replies appear publicly beneath your request. Choose a person to contact if you prefer.</div>
+
+      <form id="prayerForm" style="margin-top:12px;display:grid;gap:10px">
+        <input id="pName" placeholder="Your name (optional)" />
+        <textarea id="pBody" placeholder="Write your prayer request here" rows="4"></textarea>
+        <select id="pContact">
+          <option value="">Contact person (optional)</option>
+        </select>
+        <div style="display:flex;gap:8px">
+          <button type="submit">Send request</button>
+          <button type="button" id="btnClear" style="background:transparent;border:1px solid rgba(0,0,0,0.06);">Clear</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Recent prayers -->
+    <section class="panel" aria-labelledby="recentTitle">
+      <strong id="recentTitle">Recent requests & replies</strong>
+      <div class="muted small" id="recentDesc">Replies from admin or staff appear beneath each request.</div>
+      <div class="list" id="prayersList"></div>
+    </section>
+
+    <footer>© Church Hub</footer>
+  </div>
+
+<script>
+/*
+  prayers.html script:
+  - bilingual (EN / SW)
+  - loads /api/public for staff and public content
+  - posts to /api/prayers with optional assigned_to staff id
+  - displays recent prayers
+*/
+
+const LANG = {
+  en: {
+    title: 'Prayers',
+    subtitle: 'Submit a request; see replies from the admin',
+    staffTitle: 'People in charge',
+    staffDesc: "Choose who you'd like to contact about your prayer (optional).",
+    formTitle: 'Send a prayer request',
+    formDesc: "Your name is optional; replies appear publicly beneath your request. Choose a person to contact if you prefer.",
+    recentTitle: 'Recent requests & replies',
+    recentDesc: 'Replies from admin or staff appear beneath each request.',
+    contactBtn: 'Contact',
+    call: 'Call',
+    email: 'Email'
+  },
+  sw: {
+    title: 'Maombi ya Sala',
+    subtitle: 'Tuma ombi; jibu linaonekana hapa chini.',
+    staffTitle: 'Watu waliopo mamlakani',
+    staffDesc: 'Chagua mtu unayetaka kumwomba kuhusu sala yako (hiari).',
+    formTitle: 'Tuma ombi la sala',
+    formDesc: 'Jina lako ni hiari; majibu yanaonekana hadharani hapa chini. Chagua mtu ikiwa unataka kumfikia moja kwa moja.',
+    recentTitle: 'Maombi ya karibuni & majibu',
+    recentDesc: 'Majibu kutoka kwa admin au watu walioteuliwa yanaonekana hapa.',
+    contactBtn: 'Mawasiliano',
+    call: 'Piga',
+    email: 'Barua pepe'
+  }
+};
+
+function setLang(l){
+  localStorage.setItem('ch_prayers_lang', l);
+  const m = LANG[l] || LANG.en;
+  document.getElementById('title').textContent = m.title;
+  document.getElementById('subtitle').textContent = m.subtitle;
+  document.getElementById('staffTitle').textContent = m.staffTitle;
+  document.getElementById('staffDesc').textContent = m.staffDesc;
+  document.getElementById('formTitle').textContent = m.formTitle;
+  document.getElementById('formDesc').textContent = m.formDesc;
+  document.getElementById('recentTitle').textContent = m.recentTitle;
+  document.getElementById('recentDesc').textContent = m.recentDesc;
+  document.getElementById('lngEn').classList.toggle('active', l==='en');
+  document.getElementById('lngSw').classList.toggle('active', l==='sw');
+}
+document.getElementById('lngEn').addEventListener('click', ()=>setLang('en'));
+document.getElementById('lngSw').addEventListener('click', ()=>setLang('sw'));
+setLang(localStorage.getItem('ch_prayers_lang') || 'en');
+
+async function api(path, opts={}){ opts.credentials='same-origin'; if(opts.body && typeof opts.body === 'object'){ opts.headers=opts.headers||{}; opts.headers['Content-Type']='application/json'; opts.body=JSON.stringify(opts.body);} const res = await fetch(path, opts); const txt = await res.text(); try{ return JSON.parse(txt); }catch(e){ return txt; } }
+
+function escape(s){ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// populate staff grid and select
+async function loadStaff(){
+  try{
+    const pub = await api('/api/public');
+    const staff = pub.staff || [];
+    const grid = document.getElementById('staffGrid');
+    const sel = document.getElementById('pContact');
+    if(!staff.length){
+      grid.innerHTML = '<div class="muted">No people added</div>';
+      sel.innerHTML = '<option value="">Contact person (optional)</option>';
+      return;
+    }
+    grid.innerHTML = staff.map(s => {
+      const contactHtml = s.contact ? `<div class="muted small" style="margin-top:6px">${escape(s.contact)}</div>` : '';
+      // clickable contact: if contact contains '@' -> mailto, if starts with + or digits -> tel
+      const contactBtn = s.contact ? (() => {
+        const c = s.contact.trim();
+        if(c.includes('@')) return `<a href="mailto:${escape(c)}" style="display:inline-block;margin-top:8px;text-decoration:none"><button type="button">${(LANG[localStorage.getItem('ch_prayers_lang')] || LANG.en).contactBtn}</button></a>`;
+        if(/[0-9\+\s\-()]{7,}/.test(c)) return `<a href="tel:${escape(c)}" style="display:inline-block;margin-top:8px;text-decoration:none"><button type="button">${(LANG[localStorage.getItem('ch_prayers_lang')] || LANG.en).call}</button></a>`;
+        return '';
+      })() : '';
+      return `<div class="staff-card"><div class="label">${escape(s.name)}</div><div class="small">${escape(s.role||'')}</div>${contactHtml}${contactBtn}</div>`;
+    }).join('');
+    // populate select
+    sel.innerHTML = '<option value="">Contact person (optional)</option>' + staff.map(s => `<option value="${escape(s.id)}">${escape(s.name)}${s.role? ' • ' + escape(s.role):''}</option>`).join('');
+  }catch(e){
+    console.error(e);
+  }
+}
+
+// submit prayer
+document.getElementById('prayerForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = document.getElementById('pName').value.trim() || 'Anonymous';
+  const body = document.getElementById('pBody').value.trim();
+  const assigned_to = document.getElementById('pContact').value || '';
+  if(!body){ alert('Write request'); return; }
+  try{
+    await api('/api/prayers', { method:'POST', body:{ name, body, assigned_to } });
+    document.getElementById('pBody').value = '';
+    document.getElementById('pName').value = '';
+    document.getElementById('pContact').value = '';
+    loadPrayers();
+    alert('Request sent — asante!');
+  }catch(err){
+    console.error(err);
+    alert(err && err.error ? err.error : 'Failed to send');
+  }
+});
+
+document.getElementById('btnClear').addEventListener('click', ()=>{
+  document.getElementById('pBody').value = '';
+  document.getElementById('pName').value = '';
+  document.getElementById('pContact').value = '';
+});
+
+// load recent prayers
+async function loadPrayers(){
+  try{
+    const j = await api('/api/prayers');
+    const el = document.getElementById('prayersList');
+    if(!Array.isArray(j) || !j.length){ el.innerHTML = '<div class="muted">No prayers yet</div>'; return; }
+    el.innerHTML = j.map(p => {
+      const assigned = p.assigned_name ? `<div class="small" style="margin-top:6px;color:#065f46">Directed to: ${escape(p.assigned_name)}</div>` : '';
+      return `<div class="item">
+        <div class="label">${escape(p.name)}</div>
+        <div class="muted small">${escape(p.created_at||'')}</div>
+        <div style="margin-top:8px">${escape(p.body)}</div>
+        ${assigned}
+        ${p.reply ? `<div style="margin-top:8px;color:#065f46"><strong>Reply:</strong> ${escape(p.reply)}</div>` : ''}
+      </div>`;
+    }).join('');
+  }catch(e){
+    console.error(e);
+    document.getElementById('prayersList').innerHTML = '<div class="muted">Could not load</div>';
+  }
+}
+
+// init
+loadStaff();
+loadPrayers();
+setInterval(loadPrayers, 30_000); // refresh every 30s
+</script>
+</body>
+</html>

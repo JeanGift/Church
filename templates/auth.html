@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Church Hub — Sign in</title>
+<meta name="theme-color" content="#16A34A" />
+<style>
+  :root{
+    --bg:#f8fffb; --card:#fff; --accent:#16A34A; --muted:#6b7280; --text:#071028;
+    --radius:12px; --max:720px; --font:Inter,system-ui,Arial;
+  }
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:var(--font)}
+  .wrap{max-width:520px;margin:28px auto;padding:18px}
+  .brand{display:flex;flex-direction:column;align-items:center;gap:6px}
+  h1{margin:0;font-size:22px}
+  .muted{color:var(--muted);font-size:13px}
+  .panel{background:var(--card);padding:14px;border-radius:14px;box-shadow:0 8px 24px rgba(3,7,18,0.06);border:1px solid rgba(0,0,0,0.04);margin-top:14px}
+  input,button{width:100%;padding:12px;border-radius:10px;border:1px solid rgba(0,0,0,0.06);box-sizing:border-box;font-size:15px;margin-top:8px}
+  button{background:linear-gradient(90deg,var(--accent),#059669);color:#fff;border:0;font-weight:700;cursor:pointer}
+  .row{display:flex;gap:8px}
+  .muted-btn{background:transparent;border:1px solid rgba(0,0,0,0.06);padding:10px;border-radius:10px;cursor:pointer}
+  .lang{display:flex;gap:8px;justify-content:center;margin-top:8px}
+  .small{font-size:13px;color:var(--muted)}
+  #__toast__{position:fixed;right:16px;bottom:16px;padding:10px 12px;background:#071028;color:#fff;border-radius:8px;display:none}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">
+      <h1>Church Hub</h1>
+      <div class="muted">Sign in (admins) — staff can sign in too</div>
+    </div>
+
+    <div id="authPanel" class="panel">
+      <div id="registerBox" style="display:none">
+        <strong>Create first admin</strong>
+        <div class="muted small" style="margin-top:6px">Create the initial admin account for your site.</div>
+        <input id="regName" placeholder="Full name" />
+        <input id="regPass" placeholder="Password" type="password" />
+        <div class="row">
+          <button id="btnRegister">Create admin</button>
+          <button id="btnShowLogin" class="muted-btn">Login instead</button>
+        </div>
+      </div>
+
+      <div id="loginBox" style="display:none">
+        <strong>Sign in</strong>
+        <div class="muted small" style="margin-top:6px">Admins sign in here. Staff can also sign in (they will be redirected to staff dashboard).</div>
+        <input id="loginName" placeholder="Name or email" />
+        <input id="loginPass" placeholder="Password" type="password" />
+        <div class="row">
+          <button id="btnLogin">Sign in</button>
+          <button id="btnShowRegister" class="muted-btn">Register (first admin)</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="lang">
+      <button id="langEn" class="muted-btn">EN</button>
+      <button id="langSw" class="muted-btn">SW</button>
+    </div>
+
+    <div style="text-align:center;margin-top:12px" class="small">After login you'll be sent to the correct dashboard.</div>
+    <footer style="text-align:center;margin-top:18px;color:var(--muted);font-size:13px">© Church Hub</footer>
+  </div>
+
+  <div id="__toast__"></div>
+
+<script>
+const toastEl = document.getElementById('__toast__');
+function toast(t, ms=1600){ toastEl.textContent = t; toastEl.style.display='block'; setTimeout(()=>toastEl.style.display='none', ms); }
+
+async function call(path, opts={}){
+  opts.credentials = 'same-origin';
+  if(opts.body && typeof opts.body === 'object'){
+    opts.headers = opts.headers || {}; opts.headers['Content-Type']='application/json'; opts.body = JSON.stringify(opts.body);
+  }
+  try{
+    const r = await fetch(path, opts);
+    const txt = await r.text();
+    let json = null;
+    try{ json = JSON.parse(txt); }catch(e){}
+    return { ok: r.ok, status: r.status, json, text: txt };
+  }catch(e){
+    return { ok:false, status:0, json:null, text: String(e) };
+  }
+}
+
+document.getElementById('btnShowLogin').addEventListener('click', ()=>{ showLogin(); });
+document.getElementById('btnShowRegister').addEventListener('click', ()=>{ showRegister(); });
+
+async function init(){
+  // check if first admin exists
+  const exists = await call('/api/admin/exists', { method:'GET' });
+  if(exists.ok && exists.json && !exists.json.exists){
+    showRegister();
+  } else {
+    showLogin();
+  }
+}
+
+function showRegister(){
+  document.getElementById('registerBox').style.display='block';
+  document.getElementById('loginBox').style.display='none';
+}
+function showLogin(){
+  document.getElementById('registerBox').style.display='none';
+  document.getElementById('loginBox').style.display='block';
+}
+
+document.getElementById('btnRegister').addEventListener('click', async ()=>{
+  const name = document.getElementById('regName').value.trim();
+  const pass = document.getElementById('regPass').value;
+  if(!name || !pass) return toast('name & password');
+  const r = await call('/api/admin/register', { method:'POST', body:{ name, password: pass }});
+  if(!r.ok) return toast(r.json && r.json.error ? r.json.error : 'Register failed');
+  // registration signs in the admin (session set server-side)
+  window.location = '/admin';
+});
+
+document.getElementById('btnLogin').addEventListener('click', async ()=>{
+  const name = document.getElementById('loginName').value.trim();
+  const pass = document.getElementById('loginPass').value;
+  if(!name || !pass) return toast('name & password');
+
+  // try admin login first
+  let r = await call('/api/admin/login', { method:'POST', body:{ name, password: pass }});
+  if(r.ok){
+    window.location = '/admin';
+    return;
+  }
+
+  // then try staff login
+  r = await call('/api/staff/login', { method:'POST', body:{ name, password: pass }});
+  if(r.ok){
+    window.location = '/staff';
+    return;
+  }
+
+  toast('Invalid credentials');
+});
+
+// language toggles (visual only)
+document.getElementById('langEn').addEventListener('click', ()=>{ localStorage.setItem('ch_lang','en'); toast('English'); });
+document.getElementById('langSw').addEventListener('click', ()=>{ localStorage.setItem('ch_lang','sw'); toast('Kiswahili'); });
+
+init();
+</script>
+</body>
+</html>

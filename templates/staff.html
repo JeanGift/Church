@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Church Hub — Staff</title>
+<meta name="theme-color" content="#16A34A"/>
+<style>
+  :root{--bg:#f8fffb;--card:#fff;--muted:#6b7280;--text:#071028;--accent:#16A34A;--radius:12px;--max:920px;--font:Inter,system-ui,Arial}
+  html,body{height:100%;margin:0;font-family:var(--font);background:var(--bg);color:var(--text)}
+  .wrap{max-width:var(--max);margin:18px auto;padding:14px}
+  .panel{background:var(--card);padding:12px;border-radius:var(--radius);box-shadow:0 10px 30px rgba(3,7,18,0.05);border:1px solid rgba(0,0,0,0.04)}
+  input,button,textarea,select{width:100%;padding:10px;border-radius:10px;border:1px solid rgba(0,0,0,0.06);box-sizing:border-box;font-size:14px}
+  button{background:linear-gradient(90deg,var(--accent),#059669);color:#fff;border:0;font-weight:700;cursor:pointer}
+  .muted{color:var(--muted);font-size:13px}
+  .row{display:flex;gap:8px}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .hidden{display:none}
+  .list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+  .item{padding:10px;border-radius:10px;background:#fff;border:1px solid rgba(0,0,0,0.04)}
+  header{display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .lang{display:flex;gap:6px}
+  .lang button{border:0;background:transparent;padding:6px;border-radius:8px;cursor:pointer}
+  .lang button.active{background:var(--accent);color:#fff}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h2 id="title">Staff — Dashboard</h2>
+        <div class="muted" id="subtitle">Limited access for people in charge</div>
+      </div>
+      <div>
+        <div class="lang" style="display:inline-flex">
+          <button id="lngEn">EN</button>
+          <button id="lngSw">SW</button>
+        </div>
+        <button id="btnLogout" class="muted" style="margin-left:12px;display:none">Logout</button>
+      </div>
+    </header>
+
+    <div id="loginPanel" class="panel" style="margin-top:12px">
+      <h3 id="loginHeading">Sign in</h3>
+      <div class="muted small" id="loginSub">Sign in with credentials given by admin.</div>
+      <div style="margin-top:10px">
+        <input id="staffName" placeholder="Name or email" />
+        <input id="staffPass" placeholder="Password" type="password" style="margin-top:8px" />
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button id="btnStaffLogin">Sign in</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="dash" class="panel hidden" style="margin-top:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <strong id="who">Hello</strong>
+          <div class="muted" id="roleLabel"></div>
+        </div>
+        <div id="quickActions"></div>
+      </div>
+
+      <div id="prayersSection" style="margin-top:12px" class="hidden">
+        <strong id="prayersTitle">Prayer requests</strong>
+        <div class="muted small" id="prayersInfo">Reply to requests — replies appear publicly.</div>
+        <div id="prayersList" class="list"></div>
+      </div>
+
+      <div id="membersSection" style="margin-top:12px" class="hidden">
+        <strong id="membersTitle">Members (read-only)</strong>
+        <div class="muted small" id="membersInfo">View the member list and attendance only.</div>
+        <div id="membersList" class="list"></div>
+      </div>
+
+      <div id="donationsSection" style="margin-top:12px" class="hidden">
+        <strong id="donTitle">Add donation</strong>
+        <div style="margin-top:8px">
+          <input id="donorName" placeholder="Donor (optional)" />
+          <input id="donAmount" placeholder="Amount" style="margin-top:8px" />
+          <div style="margin-top:8px"><button id="btnAddDonation">Add donation</button></div>
+        </div>
+        <div id="donationsRecent" class="list" style="margin-top:10px"></div>
+      </div>
+
+      <div id="postSection" style="margin-top:12px" class="hidden">
+        <strong id="postTitle">Post content</strong>
+        <div class="muted small" id="postInfo">Create Bible study, event, announcement or resource.</div>
+        <div style="margin-top:8px">
+          <input id="contentTitle" placeholder="Title" />
+          <input id="contentSub" placeholder="Date / Passage / URL" style="margin-top:8px" />
+          <textarea id="contentNotes" placeholder="Notes" style="margin-top:8px"></textarea>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button id="btnPostBible">Bible</button>
+            <button id="btnPostEvent" style="background:#3b82f6">Event</button>
+            <button id="btnPostSummon" style="background:#ef4444">Announcement</button>
+            <button id="btnPostResource" style="background:#0ea5a4">Resource</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+// translations (EN / SW)
+const LANG = {
+  en: {
+    title: 'Staff — Dashboard',
+    subtitle: 'Limited access for people in charge',
+    loginHeading: 'Sign in',
+    loginSub: 'Sign in with credentials given by admin.',
+    prayersTitle: 'Prayer requests',
+    prayersInfo: 'Reply to requests — replies appear publicly.',
+    membersTitle: 'Members (read-only)',
+    membersInfo: 'View the member list and attendance only.',
+    donTitle: 'Add donation',
+    postTitle: 'Post content',
+    postInfo: 'Create Bible study, event, announcement or resource.'
+  },
+  sw: {
+    title: 'Waajiriwa — Dashibodi',
+    subtitle: 'Upatikanaji mdogo kwa wale waliopo mamlakani',
+    loginHeading: 'Ingia',
+    loginSub: 'Ingia kwa nyaraka zilizotolewa na msimamizi.',
+    prayersTitle: 'Maombi ya Sala',
+    prayersInfo: 'Jibu maombi — majibu yanaonekana hadharani.',
+    membersTitle: 'Waumini (kusoma tu)',
+    membersInfo: 'Tazama orodha ya waumini na mahudhurio tu.',
+    donTitle: 'Ongeza michango',
+    postTitle: 'Chapisha maudhui',
+    postInfo: 'Tengeneza somo la Biblia, tukio, tangazo au rasilimali.'
+  }
+};
+
+function setLang(l){
+  localStorage.setItem('staff_lang', l);
+  const m = LANG[l] || LANG.en;
+  document.getElementById('title').textContent = m.title;
+  document.getElementById('subtitle').textContent = m.subtitle;
+  document.getElementById('loginHeading').textContent = m.loginHeading;
+  document.getElementById('loginSub').textContent = m.loginSub;
+  document.getElementById('prayersTitle').textContent = m.prayersTitle;
+  document.getElementById('prayersInfo').textContent = m.prayersInfo;
+  document.getElementById('membersTitle').textContent = m.membersTitle;
+  document.getElementById('membersInfo').textContent = m.membersInfo;
+  document.getElementById('donTitle').textContent = m.donTitle;
+  document.getElementById('postTitle').textContent = m.postTitle;
+  document.getElementById('postInfo').textContent = m.postInfo;
+  document.getElementById('lngEn').classList.toggle('active', l==='en');
+  document.getElementById('lngSw').classList.toggle('active', l==='sw');
+}
+document.getElementById('lngEn').addEventListener('click', ()=>setLang('en'));
+document.getElementById('lngSw').addEventListener('click', ()=>setLang('sw'));
+setLang(localStorage.getItem('staff_lang') || 'en');
+
+// API helper
+async function api(path, opts={}){ opts.credentials='same-origin'; if(opts.body && typeof opts.body==='object'){ opts.headers=opts.headers||{}; opts.headers['Content-Type']='application/json'; opts.body=JSON.stringify(opts.body);} const r = await fetch(path, opts); const t = await r.text(); try{return JSON.parse(t);}catch(e){return t;} }
+function escape(s){ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function show(id, yes){ document.getElementById(id).classList.toggle('hidden', !yes); }
+
+// LOGIN
+document.getElementById('btnStaffLogin').addEventListener('click', async ()=>{
+  const name = document.getElementById('staffName').value.trim();
+  const password = document.getElementById('staffPass').value;
+  if(!name || !password) return alert('Enter credentials');
+  try{
+    const res = await fetch('/api/staff/login', { method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, password }) });
+    if(res.status===200){
+      await loadMe();
+    } else {
+      const txt = await res.text().catch(()=>null);
+      let err;
+      try{ err = JSON.parse(txt); }catch(e){ err = txt; }
+      alert((err && err.error) || 'Login failed');
+    }
+  }catch(e){ console.error(e); alert('Login error'); }
+});
+
+// LOGOUT
+document.getElementById('btnLogout').addEventListener('click', async ()=>{
+  await api('/api/staff/logout', { method:'POST' });
+  location.reload();
+});
+
+// load staff session & initialise UI
+async function loadMe(){
+  const me = await api('/api/staff/me');
+  if(!me || !me.ok || !me.staff){
+    // show login
+    show('loginPanel', true);
+    show('dash', false);
+    document.getElementById('btnLogout').style.display = 'none';
+    return;
+  }
+  const s = me.staff;
+  show('loginPanel', false);
+  show('dash', true);
+  document.getElementById('btnLogout').style.display = 'inline-block';
+  document.getElementById('who').textContent = s.name;
+  document.getElementById('roleLabel').textContent = s.role || '';
+
+  const perms = s.perms || {};
+  // toggle feature panels
+  show('prayersSection', !!perms.reply_prayers);
+  show('membersSection', !!perms.view_members);
+  show('donationsSection', !!perms.add_donations);
+  show('postSection', !!perms.post_content);
+
+  if(perms.reply_prayers) loadPrayersInbox();
+  if(perms.view_members) loadMembers();
+  if(perms.add_donations) loadDonationsRecent();
+}
+
+// PRAYERS inbox (reply)
+async function loadPrayersInbox(){
+  try{
+    const j = await api('/api/prayers');
+    const el = document.getElementById('prayersList');
+    if(!Array.isArray(j) || !j.length){ el.innerHTML = '<div class="muted">No requests</div>'; return; }
+    el.innerHTML = j.map(p => {
+      return `<div class="item"><div style="display:flex;justify-content:space-between"><div><strong>${escape(p.name)}</strong><div class="muted" style="font-size:12px">${escape(p.created_at||'')}</div></div>${p.reply?`<div style="color:#065f46"><strong>Replied</strong></div>`:'<div class="muted small">Open</div>'}</div><div style="margin-top:8px">${escape(p.body)}</div>${p.reply?`<div style="margin-top:8px;color:#065f46"><strong>Reply:</strong> ${escape(p.reply)}</div>`:`<div style="margin-top:8px"><textarea id="reply_${p.id}" rows="2" placeholder="Write reply..."></textarea><div style="margin-top:6px"><button onclick="reply('${p.id}')">Reply</button></div></div>`}</div></div>`;
+    }).join('');
+  }catch(e){ console.error(e); }
+}
+async function reply(pid){
+  const txt = document.getElementById('reply_'+pid).value.trim(); if(!txt) return alert('Type a reply');
+  try{
+    const r = await api('/api/admin/prayers/'+pid+'/reply',{ method:'POST', body:{ reply: txt }});
+    if(r.ok){ alert('Replied'); loadPrayersInbox(); } else alert(r.error || 'Failed');
+  }catch(e){ console.error(e); alert('Failed'); }
+}
+
+// MEMBERS (read only)
+async function loadMembers(){
+  try{
+    const pub = await api('/api/public');
+    const members = pub.members || [];
+    const el = document.getElementById('membersList');
+    if(!members.length){ el.innerHTML = '<div class="muted">No members</div>'; return; }
+    el.innerHTML = members.map(m => `<div class="item"><strong>${escape(m.name)}</strong> ${m.gender?`<div class="muted">${escape(m.gender)}</div>`:''}</div>`).join('');
+  }catch(e){ console.error(e); }
+}
+
+// DONATIONS
+document.getElementById('btnAddDonation').addEventListener('click', async ()=>{
+  const name = document.getElementById('donorName').value.trim() || 'Anonymous';
+  const amount = parseFloat(document.getElementById('donAmount').value || 0);
+  if(!amount) return alert('Enter amount');
+  try{
+    const res = await api('/api/admin/donations',{ method:'POST', body:{ name, amount }});
+    if(res.ok){ alert('Donation added'); document.getElementById('donorName').value=''; document.getElementById('donAmount').value=''; loadDonationsRecent(); } else alert(res.error||'Failed');
+  }catch(e){ console.error(e); alert('Failed'); }
+});
+async function loadDonationsRecent(){
+  try{
+    // try admin endpoint (same as admin) — backend should accept staff posting donations
+    const j = await api('/api/admin/donations', { method:'GET' });
+    const el = document.getElementById('donationsRecent');
+    if(!Array.isArray(j) || !j.length){ el.innerHTML = '<div class="muted">No donations</div>'; return; }
+    el.innerHTML = j.slice(0,6).map(d=>`<div class="item"><strong>${escape(d.name)}</strong> <div class="muted">KES ${escape(String(d.amount))}</div></div>`).join('');
+  }catch(e){ console.error(e); }
+}
+
+// POST content
+document.getElementById('btnPostBible').addEventListener('click', ()=>postContent('bible'));
+document.getElementById('btnPostEvent').addEventListener('click', ()=>postContent('event'));
+document.getElementById('btnPostSummon').addEventListener('click', ()=>postContent('summon'));
+document.getElementById('btnPostResource').addEventListener('click', ()=>postContent('resource'));
+
+async function postContent(kind){
+  const title = document.getElementById('contentTitle').value.trim();
+  const sub = document.getElementById('contentSub').value.trim();
+  const notes = document.getElementById('contentNotes').value.trim();
+  if(!title) return alert('Title required');
+  try{
+    let res;
+    if(kind==='bible') res = await api('/api/admin/bible', { method:'POST', body:{ title, passage: sub, notes }});
+    if(kind==='event') res = await api('/api/admin/events', { method:'POST', body:{ title, date: sub, description: notes }});
+    if(kind==='summon') res = await api('/api/admin/summons', { method:'POST', body:{ title, body: notes }});
+    if(kind==='resource') res = await api('/api/admin/resources', { method:'POST', body:{ title, url: sub }});
+    if(res && res.ok){ alert('Posted'); document.getElementById('contentTitle').value=''; document.getElementById('contentSub').value=''; document.getElementById('contentNotes').value=''; } else alert((res && res.error) || 'Failed');
+  }catch(e){ console.error(e); alert('Failed'); }
+}
+
+// initial: check session
+loadMe();
+</script>
+</body>
+</html>
