@@ -297,6 +297,10 @@ def api_prayers():
             else:
                 assigned_to = ""
                 assigned_name = ""
+
+        # generate owner token so the submitter can later edit/delete from same device
+        owner_token = uuid.uuid4().hex
+
         prayer = {
             "id": str(uuid.uuid4()),
             "name": name,
@@ -306,12 +310,62 @@ def api_prayers():
             "reply": "",
             "status": "open",
             "created_at": now(),
-            "updated_at": now()
+            "updated_at": now(),
+            # secret token stored server-side; NOT returned in public list
+            "owner_token": owner_token
         }
         data["prayers"].insert(0, prayer)
         save_data(data)
-        return jsonify({"ok": True, "prayer": prayer})
-    return jsonify(data["prayers"])
+
+        # return prayer (without token) and the owner_token to the creator
+        pub = {k: v for k, v in prayer.items() if k != "owner_token"}
+        return jsonify({"ok": True, "prayer": pub, "owner_token": owner_token})
+
+    # GET: return public list (strip owner_token)
+    public_list = []
+    for p in data["prayers"]:
+        public_list.append({k: v for k, v in p.items() if k != "owner_token"})
+    return jsonify(public_list)
+
+
+# allow the owner (via owner_token) or admin session to edit / delete a specific prayer
+@app.route("/api/prayers/<pid>", methods=["PUT", "DELETE"])
+def api_prayer_modify(pid):
+    data = load_data()
+    prayer = next((p for p in data.get("prayers", []) if p["id"] == pid), None)
+    if not prayer:
+        return jsonify({"ok": False, "error": "Not found"}), 404
+
+    # PUT: update (requires owner_token or admin)
+    if request.method == "PUT":
+        j = request.get_json() or {}
+        owner_token = j.get("owner_token", "")
+        # allow admin session to bypass token
+        if not session.get("admin_id") and prayer.get("owner_token") != owner_token:
+            return jsonify({"ok": False, "error": "Permission denied"}), 403
+        # apply updates
+        if "name" in j:
+            prayer["name"] = j.get("name") or prayer.get("name", "")
+        if "body" in j:
+            prayer["body"] = j.get("body") or prayer.get("body", "")
+        if "assigned_to" in j:
+            prayer["assigned_to"] = j.get("assigned_to") or ""
+            staff = next((s for s in data.get("staff", []) if s["id"] == prayer["assigned_to"]), None)
+            prayer["assigned_name"] = staff.get("name","") if staff else ""
+        prayer["updated_at"] = now()
+        save_data(data)
+        pub = {k: v for k, v in prayer.items() if k != "owner_token"}
+        return jsonify({"ok": True, "prayer": pub})
+
+    # DELETE: remove (requires owner_token or admin)
+    if request.method == "DELETE":
+        j = request.get_json() or {}
+        owner_token = j.get("owner_token", "")
+        if not session.get("admin_id") and prayer.get("owner_token") != owner_token:
+            return jsonify({"ok": False, "error": "Permission denied"}), 403
+        data["prayers"] = [p for p in data.get("prayers", []) if p["id"] != pid]
+        save_data(data)
+        return jsonify({"ok": True})
 
 # ------------------ admin auth ------------------
 
