@@ -14,11 +14,6 @@ Environment variables (optional):
   KEEPALIVE_INTERVAL - seconds between pings (default 1200 = 20min)
   UPTIME_MONITORS - comma-separated extra URLs to ping (optional)
   RUN_KEEPALIVE_IN_WORKERS - "1" to allow thread to start in each worker (default "1")
-
-Behavior:
-- If GITHUB_TOKEN + GITHUB_REPO are set and GitHub reachable -> reads/writes DB on GitHub (DB_PATH).
-- If GitHub not configured or write fails -> falls back to local data.json.
-- Keep-alive background thread pings APP_URL (and optional monitors) at configured interval.
 """
 import os
 import json
@@ -48,9 +43,7 @@ LOCAL_DATA_FILE = ROOT / "data.json"
 _GITHUB_SHA = None
 
 def load_from_github():
-    """
-    Returns (data_dict, sha) or (None, None) if failed.
-    """
+    """Returns (data_dict, sha) or (None, None) if failed."""
     if not GITHUB_TOKEN or not REPO:
         return None, None
     url = f"https://api.github.com/repos/{REPO}/contents/{DB_PATH}?ref={BRANCH}"
@@ -72,30 +65,19 @@ def load_from_github():
     return None, None
 
 def save_to_github(data, sha=None):
-    """
-    Saves data to the repo path. Returns (success_bool, new_sha_or_None).
-    """
+    """Saves data to the repo path. Returns (success_bool, new_sha_or_None)."""
     if not GITHUB_TOKEN or not REPO:
         return False, None
-
     url = f"https://api.github.com/repos/{REPO}/contents/{DB_PATH}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
-
     content_b64 = base64.b64encode(json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")).decode("utf-8")
-
-    payload = {
-        "message": "Update database (auto)",
-        "content": content_b64,
-        "branch": BRANCH
-    }
+    payload = {"message": "Update database (auto)", "content": content_b64, "branch": BRANCH}
     if sha:
         payload["sha"] = sha
-
     try:
         r = requests.put(url, headers=headers, json=payload, timeout=15)
     except Exception:
         return False, None
-
     if r.status_code in (200, 201):
         try:
             new_sha = r.json().get("content", {}).get("sha")
@@ -116,17 +98,17 @@ DEFAULT_DATA = {
     "members": [],
     "attendance": {},
     "events": [],
-    "summons": [],
+    "summons": [],       # announcements
     "bible": [],
     "resources": [],
     "donations": [],
+    "contributions": [], # tithes / offerings / pledges (new collection)
     "prayers": []
 }
 
 START_TIME = datetime.datetime.utcnow()
-# flags / status
-app.config.setdefault("KEEPALIVE_RUNNING", False)   # set by worker loop while running
-app.config.setdefault("KEEPALIVE_STARTED", False)   # set once we start thread in this process
+app.config.setdefault("KEEPALIVE_RUNNING", False)
+app.config.setdefault("KEEPALIVE_STARTED", False)
 app.config.setdefault("LAST_PINGS", {})
 app.config.setdefault("GITHUB_SHA", None)
 
@@ -136,22 +118,17 @@ def now():
 # ------------------ load/save data (GitHub-aware) ------------------
 
 def load_data():
-    """
-    Loads data from GitHub if configured, otherwise from local file.
-    Ensures DEFAULT_DATA keys exist and returns dict.
-    """
+    """Loads data from GitHub if configured, otherwise from local file. Ensures DEFAULT_DATA keys exist and returns dict."""
     global _GITHUB_SHA
-
     # Try GitHub first
     if GITHUB_TOKEN and REPO:
         db, sha = load_from_github()
         if isinstance(db, dict):
             _GITHUB_SHA = sha
-            # ensure keys
             for k, v in DEFAULT_DATA.items():
                 if k not in db:
                     db[k] = v
-            # Write local cache for convenience (best-effort)
+            # local cache (best-effort)
             try:
                 with open(LOCAL_DATA_FILE, "w", encoding="utf-8") as f:
                     json.dump(db, f, indent=2, ensure_ascii=False)
@@ -159,7 +136,6 @@ def load_data():
                 pass
             app.config["GITHUB_SHA"] = _GITHUB_SHA
             return db
-
     # Fallback to local file
     if not LOCAL_DATA_FILE.exists():
         try:
@@ -167,7 +143,6 @@ def load_data():
                 json.dump(DEFAULT_DATA.copy(), f, indent=2, ensure_ascii=False)
         except Exception:
             pass
-
     try:
         with open(LOCAL_DATA_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -178,26 +153,18 @@ def load_data():
                 json.dump(data, f, indent=2, ensure_ascii=False)
         except Exception:
             pass
-
-    # ensure keys
     for k, v in DEFAULT_DATA.items():
         if k not in data:
             data[k] = v
     return data
 
 def save_data(data):
-    """
-    Saves data either to GitHub (if configured) or to local file.
-    When GitHub is used, we update the in-process _GITHUB_SHA.
-    Returns True on success (GitHub or local), False otherwise.
-    """
+    """Saves data either to GitHub (if configured) or to local file. Updates in-process SHA. Returns True on success."""
     global _GITHUB_SHA
-
     if GITHUB_TOKEN and REPO:
         success, new_sha = save_to_github(data, sha=_GITHUB_SHA)
         if success:
             _GITHUB_SHA = new_sha
-            # also update local cache best-effort
             try:
                 with open(LOCAL_DATA_FILE, "w", encoding="utf-8") as f:
                     json.dump(data, f, indent=2, ensure_ascii=False)
@@ -206,7 +173,7 @@ def save_data(data):
             app.config["GITHUB_SHA"] = _GITHUB_SHA
             return True
         else:
-            # fallback to local file
+            # fallback local
             try:
                 with open(LOCAL_DATA_FILE, "w", encoding="utf-8") as f:
                     json.dump(data, f, indent=2, ensure_ascii=False)
@@ -235,22 +202,17 @@ def staff_or_admin_allowed(check_perm_name=None):
     def outer(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            # admin always allowed
             if session.get("admin_id"):
                 return fn(*args, **kwargs)
-
             sid = session.get("staff_id")
             if not sid:
                 return jsonify({"ok": False, "error": "Login required"}), 403
-
             data = load_data()
             staff = next((s for s in data.get("staff", []) if s["id"] == sid), None)
             if not staff:
                 return jsonify({"ok": False, "error": "Staff not found"}), 403
-
             if check_perm_name and not staff.get("perms", {}).get(check_perm_name):
                 return jsonify({"ok": False, "error": "Permission denied"}), 403
-
             return fn(*args, **kwargs)
         return wrapper
     return outer
@@ -297,6 +259,7 @@ def sw():
 def api_public():
     d = load_data()
     public_staff = [{"id": s["id"], "name": s["name"], "role": s.get("role",""), "contact": s.get("contact","")} for s in d.get("staff", [])]
+    # Return contributions so finance.html can consume them
     return jsonify({
         "members": d["members"],
         "attendance": d["attendance"],
@@ -305,6 +268,7 @@ def api_public():
         "bible": d["bible"],
         "resources": d["resources"],
         "donations": d["donations"],
+        "contributions": d["contributions"],
         "staff": public_staff
     })
 
@@ -313,16 +277,13 @@ def api_public():
 @app.route("/api/prayers", methods=["GET", "POST"])
 def api_prayers():
     data = load_data()
-
     if request.method == "POST":
         j = request.get_json() or {}
         body = (j.get("body") or "").strip()
         name = (j.get("name") or "Anonymous").strip()
         assigned_to = (j.get("assigned_to") or "").strip()
-
         if not body:
             return jsonify({"ok": False, "error": "Prayer cannot be empty"}), 400
-
         assigned_name = ""
         if assigned_to:
             staff = next((s for s in data.get("staff", []) if s["id"] == assigned_to), None)
@@ -331,7 +292,6 @@ def api_prayers():
             else:
                 assigned_to = ""
                 assigned_name = ""
-
         prayer = {
             "id": str(uuid.uuid4()),
             "name": name,
@@ -346,7 +306,6 @@ def api_prayers():
         data["prayers"].insert(0, prayer)
         save_data(data)
         return jsonify({"ok": True, "prayer": prayer})
-
     return jsonify(data["prayers"])
 
 # ------------------ admin auth ------------------
@@ -360,49 +319,30 @@ def admin_register():
     data = load_data()
     if data["admins"]:
         return jsonify({"ok": False, "error": "Admin already exists"}), 400
-
     j = request.get_json() or {}
     name = (j.get("name") or "").strip()
     password = j.get("password") or ""
-
     if not name or not password:
         return jsonify({"ok": False, "error": "Name & password required"}), 400
-
-    admin = {
-        "id": str(uuid.uuid4()),
-        "name": name,
-        "pass_hash": generate_password_hash(password),
-        "created_at": now()
-    }
-
+    admin = {"id": str(uuid.uuid4()), "name": name, "pass_hash": generate_password_hash(password), "created_at": now()}
     data["admins"] = [admin]
     save_data(data)
-
     session.clear()
     session["admin_id"] = admin["id"]
     session["admin_name"] = admin["name"]
-
-    return jsonify({
-        "ok": True,
-        "admin": {"id": admin["id"], "name": admin["name"]}
-    })
+    return jsonify({"ok": True, "admin": {"id": admin["id"], "name": admin["name"]}})
 
 @app.route("/api/admin/login", methods=["POST"])
 def admin_login():
     j = request.get_json() or {}
     name = (j.get("name") or "").strip()
     password = j.get("password") or ""
-
     for admin in load_data()["admins"]:
         if admin["name"] == name and check_password_hash(admin["pass_hash"], password):
             session.clear()
             session["admin_id"] = admin["id"]
             session["admin_name"] = admin["name"]
-            return jsonify({
-                "ok": True,
-                "admin": {"id": admin["id"], "name": admin["name"]}
-            })
-
+            return jsonify({"ok": True, "admin": {"id": admin["id"], "name": admin["name"]}})
     return jsonify({"ok": False, "error": "Invalid credentials"}), 401
 
 @app.route("/api/admin/logout", methods=["POST"])
@@ -421,12 +361,7 @@ def admin_add_admin():
     password = j.get("password") or ""
     if not name or not password:
         return jsonify({"ok": False, "error": "Name & password required"}), 400
-    new_admin = {
-        "id": str(uuid.uuid4()),
-        "name": name,
-        "pass_hash": generate_password_hash(password),
-        "created_at": now()
-    }
+    new_admin = {"id": str(uuid.uuid4()), "name": name, "pass_hash": generate_password_hash(password), "created_at": now()}
     data.setdefault("admins", []).append(new_admin)
     save_data(data)
     return jsonify({"ok": True, "admin": {"id": new_admin["id"], "name": new_admin["name"]}})
@@ -437,34 +372,42 @@ def admin_list_admins():
     data = load_data()
     return jsonify([{"id":a["id"], "name":a["name"], "created_at": a.get("created_at")} for a in data.get("admins",[])])
 
-# ------------------ admin: members ------------------
+# ------------------ admin: members (CRUD) ------------------
 
-@app.route("/api/admin/members", methods=["GET", "POST", "DELETE"])
+@app.route("/api/admin/members", methods=["GET", "POST", "PUT", "DELETE"])
 @admin_required
 def admin_members():
     data = load_data()
-
     if request.method == "GET":
         return jsonify(data["members"])
-
     j = request.get_json() or {}
-
     if request.method == "POST":
         name = (j.get("name") or "").strip()
         if not name:
             return jsonify({"ok": False, "error": "Name required"}), 400
-        m = {"id": str(uuid.uuid4()), "name": name, "gender": j.get("gender","")}
+        m = {"id": str(uuid.uuid4()), "name": name, "gender": j.get("gender",""), "created_at": now()}
         data["members"].append(m)
         save_data(data)
         return jsonify({"ok": True, "member": m})
-
-    if request.method == "DELETE":
+    if request.method == "PUT":
         mid = j.get("id")
-        data["members"] = [m for m in data["members"] if m["id"] != mid]
-        for day in data["attendance"].values():
-            day.pop(mid, None)
-        save_data(data)
-        return jsonify({"ok": True})
+        if not mid:
+            return jsonify({"ok": False, "error": "id required"}), 400
+        for m in data["members"]:
+            if m["id"] == mid:
+                m["name"] = j.get("name", m.get("name",""))
+                m["gender"] = j.get("gender", m.get("gender",""))
+                m["updated_at"] = now()
+                save_data(data)
+                return jsonify({"ok": True, "member": m})
+        return jsonify({"ok": False, "error": "Member not found"}), 404
+    # DELETE
+    mid = j.get("id")
+    data["members"] = [m for m in data["members"] if m["id"] != mid]
+    for day in data["attendance"].values():
+        day.pop(mid, None)
+    save_data(data)
+    return jsonify({"ok": True})
 
 # ------------------ admin: attendance ------------------
 
@@ -475,47 +418,67 @@ def admin_attendance():
     date = j.get("date")
     mid = j.get("id")
     status = j.get("status")
-
     if not date or not mid or status not in ("present", "absent"):
         return jsonify({"ok": False, "error": "Invalid data"}), 400
-
     data = load_data()
-    data["attendance"].setdefault(date, {})[mid] = {
-        "status": status,
-        "edited_at": now()
-    }
+    data["attendance"].setdefault(date, {})[mid] = {"status": status, "edited_at": now()}
     save_data(data)
     return jsonify({"ok": True})
 
-# ------------------ admin: content posting ------------------
+# ------------------ admin: content posting & editing (events, summons, bible, resources) ------------------
+# Staff/admin with 'post_content' can POST and PUT; DELETE requires admin
 
-def simple_post(collection):
-    j = request.get_json() or {}
+def find_and_update(collection, item_id, updates):
     data = load_data()
+    for item in data.get(collection, []):
+        if item.get("id") == item_id:
+            item.update(updates)
+            item["updated_at"] = now()
+            save_data(data)
+            return item
+    return None
+
+@app.route("/api/admin/<collection>", methods=["GET", "POST"])
+@staff_or_admin_allowed("post_content")
+def admin_collection_post(collection):
+    # allowed collections: events, summons, bible, resources
+    if collection not in ("events", "summons", "bible", "resources"):
+        return jsonify({"ok": False, "error": "Invalid collection"}), 400
+    data = load_data()
+    j = request.get_json() or {}
     item = {"id": str(uuid.uuid4()), **j, "created_at": now()}
     data[collection].insert(0, item)
     save_data(data)
     return jsonify({"ok": True, collection[:-1]: item})
 
-@app.route("/api/admin/events", methods=["POST"])
-@staff_or_admin_allowed("post_content")
-def admin_events(): return simple_post("events")
+@app.route("/api/admin/<collection>/<item_id>", methods=["PUT", "DELETE"])
+def admin_collection_modify(collection, item_id):
+    if collection not in ("events", "summons", "bible", "resources"):
+        return jsonify({"ok": False, "error": "Invalid collection"}), 400
+    # PUT allowed for staff with post_content
+    if request.method == "PUT":
+        @staff_or_admin_allowed("post_content")
+        def _put():
+            j = request.get_json() or {}
+            updates = {k: v for k, v in j.items() if k != "id"}
+            updated = find_and_update(collection, item_id, updates)
+            if not updated:
+                return jsonify({"ok": False, "error": "Not found"}), 404
+            return jsonify({"ok": True, collection[:-1]: updated})
+        return _put()
+    # DELETE requires admin
+    if request.method == "DELETE":
+        @admin_required
+        def _del():
+            data = load_data()
+            data[collection] = [it for it in data.get(collection, []) if it.get("id") != item_id]
+            save_data(data)
+            return jsonify({"ok": True})
+        return _del()
 
-@app.route("/api/admin/summons", methods=["POST"])
-@staff_or_admin_allowed("post_content")
-def admin_summons(): return simple_post("summons")
+# ------------------ admin: donations (GET/POST/PUT/DELETE) ------------------
 
-@app.route("/api/admin/bible", methods=["POST"])
-@staff_or_admin_allowed("post_content")
-def admin_bible(): return simple_post("bible")
-
-@app.route("/api/admin/resources", methods=["POST"])
-@staff_or_admin_allowed("post_content")
-def admin_resources(): return simple_post("resources")
-
-# ------------------ admin: donations ------------------
-
-@app.route("/api/admin/donations", methods=["POST", "GET"])
+@app.route("/api/admin/donations", methods=["GET", "POST"])
 @staff_or_admin_allowed("add_donations")
 def admin_donations():
     data = load_data()
@@ -529,10 +492,104 @@ def admin_donations():
         amount = 0
     if amount <= 0:
         return jsonify({"ok": False, "error": "Invalid amount"}), 400
-    rec = {"id": str(uuid.uuid4()), "name": name, "amount": amount, "created_at": now()}
+    rec = {"id": str(uuid.uuid4()), "name": name, "amount": amount, "created_at": now(), "note": j.get("note","")}
     data["donations"].insert(0, rec)
     save_data(data)
     return jsonify({"ok": True, "donation": rec})
+
+@app.route("/api/admin/donations/<did>", methods=["PUT", "DELETE"])
+def admin_donation_modify(did):
+    if request.method == "PUT":
+        @staff_or_admin_allowed("add_donations")
+        def _put():
+            j = request.get_json() or {}
+            data = load_data()
+            for d in data["donations"]:
+                if d["id"] == did:
+                    d["name"] = j.get("name", d.get("name",""))
+                    try:
+                        if "amount" in j:
+                            d["amount"] = float(j.get("amount", d.get("amount",0)))
+                    except Exception:
+                        pass
+                    d["note"] = j.get("note", d.get("note",""))
+                    d["updated_at"] = now()
+                    save_data(data)
+                    return jsonify({"ok": True, "donation": d})
+            return jsonify({"ok": False, "error": "Not found"}), 404
+        return _put()
+    if request.method == "DELETE":
+        @admin_required
+        def _del():
+            data = load_data()
+            data["donations"] = [d for d in data["donations"] if d["id"] != did]
+            save_data(data)
+            return jsonify({"ok": True})
+        return _del()
+
+# ------------------ admin: contributions (tithes/offering/pledges) ------------------
+
+@app.route("/api/admin/contributions", methods=["GET", "POST"])
+@staff_or_admin_allowed("add_contributions")
+def admin_contributions():
+    data = load_data()
+    if request.method == "GET":
+        return jsonify(data["contributions"])
+    j = request.get_json() or {}
+    # expected fields: name, amount, category, date, note
+    name = (j.get("name") or "Anonymous").strip()
+    try:
+        amount = float(j.get("amount") or 0)
+    except Exception:
+        amount = 0
+    if amount <= 0:
+        return jsonify({"ok": False, "error": "Invalid amount"}), 400
+    rec = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "amount": amount,
+        "category": (j.get("category") or "").strip(),
+        "date": j.get("date") or now(),
+        "note": j.get("note",""),
+        "created_at": now()
+    }
+    data["contributions"].insert(0, rec)
+    save_data(data)
+    return jsonify({"ok": True, "contribution": rec})
+
+@app.route("/api/admin/contributions/<cid>", methods=["PUT", "DELETE"])
+def admin_contribution_modify(cid):
+    # PUT allowed for staff with add_contributions
+    if request.method == "PUT":
+        @staff_or_admin_allowed("add_contributions")
+        def _put():
+            j = request.get_json() or {}
+            data = load_data()
+            for c in data["contributions"]:
+                if c["id"] == cid:
+                    c["name"] = j.get("name", c.get("name",""))
+                    try:
+                        if "amount" in j:
+                            c["amount"] = float(j.get("amount", c.get("amount",0)))
+                    except Exception:
+                        pass
+                    c["category"] = j.get("category", c.get("category",""))
+                    c["date"] = j.get("date", c.get("date"))
+                    c["note"] = j.get("note", c.get("note",""))
+                    c["updated_at"] = now()
+                    save_data(data)
+                    return jsonify({"ok": True, "contribution": c})
+            return jsonify({"ok": False, "error": "Not found"}), 404
+        return _put()
+    # DELETE requires admin to avoid accidental removal by staff
+    if request.method == "DELETE":
+        @admin_required
+        def _del():
+            data = load_data()
+            data["contributions"] = [c for c in data["contributions"] if c["id"] != cid]
+            save_data(data)
+            return jsonify({"ok": True})
+        return _del()
 
 # ------------------ admin: prayer reply ------------------
 
@@ -541,7 +598,6 @@ def admin_donations():
 def reply_prayer(pid):
     j = request.get_json() or {}
     reply = (j.get("reply") or "").strip()
-
     data = load_data()
     for p in data["prayers"]:
         if p["id"] == pid:
@@ -550,7 +606,6 @@ def reply_prayer(pid):
             p["updated_at"] = now()
             save_data(data)
             return jsonify({"ok": True})
-
     return jsonify({"ok": False, "error": "Not found"}), 404
 
 # ------------------ admin: staff management ------------------
@@ -570,15 +625,7 @@ def admin_staff():
         contact = (j.get("contact") or "").strip()
         if not name or not password:
             return jsonify({"ok": False, "error": "Name & password required"}), 400
-        staff = {
-            "id": str(uuid.uuid4()),
-            "name": name,
-            "role": role,
-            "perms": perms,
-            "contact": contact,
-            "pass_hash": generate_password_hash(password),
-            "created_at": now()
-        }
+        staff = {"id": str(uuid.uuid4()), "name": name, "role": role, "perms": perms, "contact": contact, "pass_hash": generate_password_hash(password), "created_at": now()}
         data.setdefault("staff", []).append(staff)
         save_data(data)
         return jsonify({"ok": True, "staff": {"id": staff["id"], "name": staff["name"], "role": staff["role"], "perms": staff["perms"], "contact": staff.get("contact","")}})
@@ -633,10 +680,7 @@ def api_health():
     })
 
 def keepalive_worker(self_url, monitors, interval_seconds):
-    """
-    Background loop: ping self_url and extra monitors every interval_seconds.
-    Stores last success/failure timestamps in app.config["LAST_PINGS"].
-    """
+    """Background loop: ping self_url and extra monitors every interval_seconds."""
     app.logger.info(f"keepalive_worker starting: self_url={self_url} monitors={monitors} interval={interval_seconds}s")
     app.config["KEEPALIVE_RUNNING"] = True
     session_req = requests.Session()
@@ -654,14 +698,13 @@ def keepalive_worker(self_url, monitors, interval_seconds):
         time.sleep(interval_seconds)
 
 def start_keepalive_in_thread():
-    # Only start if enabled
     try:
         enabled = os.getenv("KEEPALIVE_ENABLED", "1") == "1"
         if not enabled:
             app.logger.info("KEEPALIVE_ENABLED != 1 -> not starting keepalive.")
             return
         try:
-            interval = int(os.getenv("KEEPALIVE_INTERVAL", str(1200)))  # default 20 minutes
+            interval = int(os.getenv("KEEPALIVE_INTERVAL", str(1200)))
             if interval < 60:
                 interval = 60
         except Exception:
@@ -685,14 +728,12 @@ def start_keepalive_in_thread():
     except Exception as e:
         app.logger.warning(f"failed to start keepalive: {e}")
 
-# Some Flask installations don't expose before_first_request; use before_request with a guard
+# Use before_request guard so we don't rely on before_first_request (some Flask installs lack it)
 @app.before_request
 def _ensure_keepalive_started_on_first_request():
-    # Respect RUN_KEEPALIVE_IN_WORKERS env var (default allow)
     run_in_workers = os.getenv("RUN_KEEPALIVE_IN_WORKERS", "1") == "1"
     if not run_in_workers:
         return
-    # Start keepalive on first real request (safe for Gunicorn worker processes)
     if not app.config.get("KEEPALIVE_STARTED"):
         start_keepalive_in_thread()
 
@@ -706,7 +747,6 @@ if __name__ == "__main__":
     if GITHUB_TOKEN and REPO:
         db, sha = load_from_github()
         if isinstance(db, dict):
-            # write local cache and set sha
             try:
                 with open(LOCAL_DATA_FILE, "w", encoding="utf-8") as f:
                     json.dump(db, f, indent=2, ensure_ascii=False)
@@ -714,7 +754,6 @@ if __name__ == "__main__":
                 pass
             _GITHUB_SHA = sha
             app.config["GITHUB_SHA"] = _GITHUB_SHA
-
     port = int(os.getenv("PORT", 4001))
     # start keepalive immediately when running directly
     start_keepalive_in_thread()
