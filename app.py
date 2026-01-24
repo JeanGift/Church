@@ -231,6 +231,11 @@ def prayers_page():
 def admin_page():
     return send_from_directory(str(ROOT), "admin.html")
 
+# explicit finance route so /finance works (serves finance.html)
+@app.route("/finance")
+def finance_page():
+    return send_from_directory(str(ROOT), "finance.html")
+
 @app.route("/staff")
 def staff_page():
     file = ROOT / "staff.html"
@@ -445,16 +450,32 @@ def admin_collection_post(collection):
     if collection not in ("events", "summons", "bible", "resources"):
         return jsonify({"ok": False, "error": "Invalid collection"}), 400
     data = load_data()
+    # GET returns collection items (staff/admin with post_content can view)
+    if request.method == "GET":
+        return jsonify(data.get(collection, []))
     j = request.get_json() or {}
     item = {"id": str(uuid.uuid4()), **j, "created_at": now()}
     data[collection].insert(0, item)
     save_data(data)
     return jsonify({"ok": True, collection[:-1]: item})
 
-@app.route("/api/admin/<collection>/<item_id>", methods=["PUT", "DELETE"])
+# allow GET (fetch single item), PUT (edit), DELETE (admin only)
+@app.route("/api/admin/<collection>/<item_id>", methods=["GET", "PUT", "DELETE"])
 def admin_collection_modify(collection, item_id):
     if collection not in ("events", "summons", "bible", "resources"):
         return jsonify({"ok": False, "error": "Invalid collection"}), 400
+
+    # GET: allow staff/admin with post_content to fetch single item for editing UI
+    if request.method == "GET":
+        @staff_or_admin_allowed("post_content")
+        def _get():
+            data = load_data()
+            for it in data.get(collection, []):
+                if it.get("id") == item_id:
+                    return jsonify(it)
+            return jsonify({"ok": False, "error": "Not found"}), 404
+        return _get()
+
     # PUT allowed for staff with post_content
     if request.method == "PUT":
         @staff_or_admin_allowed("post_content")
@@ -466,6 +487,7 @@ def admin_collection_modify(collection, item_id):
                 return jsonify({"ok": False, "error": "Not found"}), 404
             return jsonify({"ok": True, collection[:-1]: updated})
         return _put()
+
     # DELETE requires admin
     if request.method == "DELETE":
         @admin_required
