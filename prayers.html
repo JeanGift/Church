@@ -1,3 +1,6 @@
+
+
+
 <!doctype html>
 <html lang="en">
 <head>
@@ -38,9 +41,6 @@
   .lang button{border:0;background:transparent;padding:6px;border-radius:8px;cursor:pointer}
   .lang button.active{background:var(--accent);color:#fff}
   @media(max-width:640px){ .two{grid-template-columns:1fr} .staff-card{min-width:130px} }
-  .muted small { color: var(--muted); font-size: 12px; }
-  .controls-row { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
-  .ghost { background:transparent; border:1px solid rgba(0,0,0,0.06); color:inherit; }
 </style>
 </head>
 <body>
@@ -79,7 +79,7 @@
         </select>
         <div style="display:flex;gap:8px">
           <button type="submit">Send request</button>
-          <button type="button" id="btnClear" class="ghost">Clear</button>
+          <button type="button" id="btnClear" style="background:transparent;border:1px solid rgba(0,0,0,0.06);">Clear</button>
         </div>
       </form>
     </section>
@@ -96,11 +96,11 @@
 
 <script>
 /*
-  prayers.html script (updated):
+  prayers.html script:
   - bilingual (EN / SW)
   - loads /api/public for staff and public content
-  - posts to /api/prayers and stores returned owner_token in localStorage
-  - displays recent prayers and shows Edit/Delete for owner's prayers
+  - posts to /api/prayers with optional assigned_to staff id
+  - displays recent prayers
 */
 
 const LANG = {
@@ -115,11 +115,7 @@ const LANG = {
     recentDesc: 'Replies from admin or staff appear beneath each request.',
     contactBtn: 'Contact',
     call: 'Call',
-    email: 'Email',
-    edit: 'Edit',
-    delete: 'Delete',
-    save: 'Save',
-    cancel: 'Cancel'
+    email: 'Email'
   },
   sw: {
     title: 'Maombi ya Sala',
@@ -132,18 +128,9 @@ const LANG = {
     recentDesc: 'Majibu kutoka kwa admin au watu walioteuliwa yanaonekana hapa.',
     contactBtn: 'Mawasiliano',
     call: 'Piga',
-    email: 'Barua pepe',
-    edit: 'Hariri',
-    delete: 'Futa',
-    save: 'Hifadhi',
-    cancel: 'Ghairi'
+    email: 'Barua pepe'
   }
 };
-
-function uiText(key){
-  const l = localStorage.getItem('ch_prayers_lang') || 'en';
-  return (LANG[l] && LANG[l][key]) ? LANG[l][key] : LANG.en[key];
-}
 
 function setLang(l){
   localStorage.setItem('ch_prayers_lang', l);
@@ -163,24 +150,9 @@ document.getElementById('lngEn').addEventListener('click', ()=>setLang('en'));
 document.getElementById('lngSw').addEventListener('click', ()=>setLang('sw'));
 setLang(localStorage.getItem('ch_prayers_lang') || 'en');
 
-async function api(path, opts={}){
-  opts.credentials='same-origin';
-  if(opts.body && typeof opts.body === 'object'){
-    opts.headers=opts.headers||{}; opts.headers['Content-Type']='application/json'; opts.body=JSON.stringify(opts.body);
-  }
-  const res = await fetch(path, opts);
-  const txt = await res.text();
-  try{ return JSON.parse(txt); }catch(e){ return txt; }
-}
+async function api(path, opts={}){ opts.credentials='same-origin'; if(opts.body && typeof opts.body === 'object'){ opts.headers=opts.headers||{}; opts.headers['Content-Type']='application/json'; opts.body=JSON.stringify(opts.body);} const res = await fetch(path, opts); const txt = await res.text(); try{ return JSON.parse(txt); }catch(e){ return txt; } }
 
 function escape(s){ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-
-// local storage helpers for owner tokens: { <prayerId>: token, ... }
-const PRAYER_TOKEN_KEY = 'ch_prayer_tokens';
-function loadPrayerTokens(){ try{ return JSON.parse(localStorage.getItem(PRAYER_TOKEN_KEY) || '{}'); }catch(e){ return {}; } }
-function savePrayerToken(id, token){ const map = loadPrayerTokens(); map[id] = token; localStorage.setItem(PRAYER_TOKEN_KEY, JSON.stringify(map)); }
-function removePrayerToken(id){ const map = loadPrayerTokens(); delete map[id]; localStorage.setItem(PRAYER_TOKEN_KEY, JSON.stringify(map)); }
-function getTokenFor(id){ return loadPrayerTokens()[id]; }
 
 // populate staff grid and select
 async function loadStaff(){
@@ -191,21 +163,25 @@ async function loadStaff(){
     const sel = document.getElementById('pContact');
     if(!staff.length){
       grid.innerHTML = '<div class="muted">No people added</div>';
-      sel.innerHTML = `<option value="">${escape(uiText('contactBtn'))} (optional)</option>`;
+      sel.innerHTML = '<option value="">Contact person (optional)</option>';
       return;
     }
     grid.innerHTML = staff.map(s => {
       const contactHtml = s.contact ? `<div class="muted small" style="margin-top:6px">${escape(s.contact)}</div>` : '';
+      // clickable contact: if contact contains '@' -> mailto, if starts with + or digits -> tel
       const contactBtn = s.contact ? (() => {
         const c = s.contact.trim();
-        if(c.includes('@')) return `<a href="mailto:${escape(c)}" style="display:inline-block;margin-top:8px;text-decoration:none"><button type="button">${escape(uiText('contactBtn'))}</button></a>`;
-        if(/[0-9\+\s\-()]{7,}/.test(c)) return `<a href="tel:${escape(c)}" style="display:inline-block;margin-top:8px;text-decoration:none"><button type="button">${escape(uiText('call'))}</button></a>`;
+        if(c.includes('@')) return `<a href="mailto:${escape(c)}" style="display:inline-block;margin-top:8px;text-decoration:none"><button type="button">${(LANG[localStorage.getItem('ch_prayers_lang')] || LANG.en).contactBtn}</button></a>`;
+        if(/[0-9\+\s\-()]{7,}/.test(c)) return `<a href="tel:${escape(c)}" style="display:inline-block;margin-top:8px;text-decoration:none"><button type="button">${(LANG[localStorage.getItem('ch_prayers_lang')] || LANG.en).call}</button></a>`;
         return '';
       })() : '';
       return `<div class="staff-card"><div class="label">${escape(s.name)}</div><div class="small">${escape(s.role||'')}</div>${contactHtml}${contactBtn}</div>`;
     }).join('');
-    sel.innerHTML = `<option value="">${escape(uiText('contactBtn'))} (optional)</option>` + staff.map(s => `<option value="${escape(s.id)}">${escape(s.name)}${s.role? ' • ' + escape(s.role):''}</option>`).join('');
-  }catch(e){ console.error(e); }
+    // populate select
+    sel.innerHTML = '<option value="">Contact person (optional)</option>' + staff.map(s => `<option value="${escape(s.id)}">${escape(s.name)}${s.role? ' • ' + escape(s.role):''}</option>`).join('');
+  }catch(e){
+    console.error(e);
+  }
 }
 
 // submit prayer
@@ -216,23 +192,15 @@ document.getElementById('prayerForm').addEventListener('submit', async (e) => {
   const assigned_to = document.getElementById('pContact').value || '';
   if(!body){ alert('Write request'); return; }
   try{
-    const res = await api('/api/prayers', { method:'POST', body:{ name, body, assigned_to } });
-    if(res && res.ok){
-      // store owner token locally so user can edit/delete later
-      if(res.owner_token && res.prayer && res.prayer.id){
-        savePrayerToken(res.prayer.id, res.owner_token);
-      }
-      document.getElementById('pBody').value = '';
-      document.getElementById('pName').value = '';
-      document.getElementById('pContact').value = '';
-      loadPrayers();
-      alert('Request sent — asante!');
-    } else {
-      alert((res && res.error) ? res.error : 'Failed to send');
-    }
+    await api('/api/prayers', { method:'POST', body:{ name, body, assigned_to } });
+    document.getElementById('pBody').value = '';
+    document.getElementById('pName').value = '';
+    document.getElementById('pContact').value = '';
+    loadPrayers();
+    alert('Request sent — asante!');
   }catch(err){
     console.error(err);
-    alert('Failed to send');
+    alert(err && err.error ? err.error : 'Failed to send');
   }
 });
 
@@ -242,104 +210,27 @@ document.getElementById('btnClear').addEventListener('click', ()=>{
   document.getElementById('pContact').value = '';
 });
 
-// render a single prayer item (with edit/delete for owner)
-function renderPrayerItem(p){
-  const token = getTokenFor(p.id);
-  const assigned = p.assigned_name ? `<div class="small" style="margin-top:6px;color:#065f46">Directed to: ${escape(p.assigned_name)}</div>` : '';
-  const replyHtml = p.reply ? `<div style="margin-top:8px;color:#065f46"><strong>Reply:</strong> ${escape(p.reply)}</div>` : '';
-
-  // controls
-  let controls = '';
-  if(token){
-    controls = `<div class="controls-row">
-      <button type="button" onclick="startEditPrayer('${p.id}', ${JSON.stringify(escape(p.body))})">${escape(uiText('edit'))}</button>
-      <button type="button" onclick="deletePrayer('${p.id}')" class="ghost">${escape(uiText('delete'))}</button>
-    </div>`;
-  }
-
-  return `<div class="item" id="prayer_${p.id}">
-    <div class="label">${escape(p.name)}</div>
-    <div class="muted small">${escape(p.created_at||'')}</div>
-    <div class="prayer-body" style="margin-top:8px">${escape(p.body)}</div>
-    ${assigned}
-    ${replyHtml}
-    ${controls}
-  </div>`;
-}
-
 // load recent prayers
 async function loadPrayers(){
   try{
     const j = await api('/api/prayers');
     const el = document.getElementById('prayersList');
     if(!Array.isArray(j) || !j.length){ el.innerHTML = '<div class="muted">No prayers yet</div>'; return; }
-    el.innerHTML = j.map(p => renderPrayerItem(p)).join('');
+    el.innerHTML = j.map(p => {
+      const assigned = p.assigned_name ? `<div class="small" style="margin-top:6px;color:#065f46">Directed to: ${escape(p.assigned_name)}</div>` : '';
+      return `<div class="item">
+        <div class="label">${escape(p.name)}</div>
+        <div class="muted small">${escape(p.created_at||'')}</div>
+        <div style="margin-top:8px">${escape(p.body)}</div>
+        ${assigned}
+        ${p.reply ? `<div style="margin-top:8px;color:#065f46"><strong>Reply:</strong> ${escape(p.reply)}</div>` : ''}
+      </div>`;
+    }).join('');
   }catch(e){
     console.error(e);
     document.getElementById('prayersList').innerHTML = '<div class="muted">Could not load</div>';
   }
 }
-
-// Edit flow: replace prayer body with textarea + save/cancel controls
-window.startEditPrayer = function(id, origEscapedBody){
-  const el = document.getElementById('prayer_'+id);
-  if(!el) return;
-  const origBody = origEscapedBody ? origEscapedBody : (el.querySelector('.prayer-body') ? el.querySelector('.prayer-body').textContent : '');
-  el._orig = origBody;
-  el.innerHTML = `<div class="label">${escape(el.querySelector('.label') ? el.querySelector('.label').textContent : '')}</div>
-    <div class="muted small">${escape(el.querySelector('.muted.small') ? el.querySelector('.muted.small').textContent : '')}</div>
-    <textarea id="edit_body_${id}" rows="4" style="margin-top:8px">${escape(origBody)}</textarea>
-    <div class="controls-row">
-      <button type="button" onclick="saveEditPrayer('${id}')">${escape(uiText('save'))}</button>
-      <button type="button" onclick="cancelEditPrayer('${id}')" class="ghost">${escape(uiText('cancel'))}</button>
-    </div>`;
-};
-
-window.cancelEditPrayer = function(id){
-  // reload prayers to restore original
-  loadPrayers();
-};
-
-window.saveEditPrayer = async function(id){
-  const ta = document.getElementById('edit_body_'+id);
-  if(!ta) return;
-  const newBody = ta.value.trim();
-  if(!newBody){ alert('Please enter text.'); return; }
-  const token = getTokenFor(id);
-  const payload = { body: newBody };
-  if(token) payload.owner_token = token;
-  try{
-    const res = await api(`/api/prayers/${id}`, { method:'PUT', body: payload });
-    if(res && res.ok){
-      loadPrayers();
-      alert('Updated');
-    } else {
-      alert((res && res.error) ? res.error : 'Failed to update');
-    }
-  }catch(e){
-    console.error(e);
-    alert('Failed to update');
-  }
-};
-
-window.deletePrayer = async function(id){
-  if(!confirm('Delete this prayer?')) return;
-  const token = getTokenFor(id);
-  const payload = token ? { owner_token: token } : {};
-  try{
-    const res = await api(`/api/prayers/${id}`, { method:'DELETE', body: payload });
-    if(res && res.ok){
-      removePrayerToken(id);
-      loadPrayers();
-      alert('Deleted');
-    } else {
-      alert((res && res.error) ? res.error : 'Failed to delete');
-    }
-  }catch(e){
-    console.error(e);
-    alert('Failed to delete');
-  }
-};
 
 // init
 loadStaff();
