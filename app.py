@@ -9,16 +9,24 @@ Environment variables (optional):
   GITHUB_DB_PATH  - path in repo for DB file (default: "data/db.json")
   FLASK_SECRET    - Flask session secret (recommended to set)
   PORT            - port for gunicorn or for local run (default: 4001)
+  APP_URL         - public URL used by keep-alive (e.g. https://example.com)
+  KEEPALIVE_ENABLED - "1" to enable keep-alive (default "1")
+  KEEPALIVE_INTERVAL - seconds between pings (default 1200 = 20min)
+  UPTIME_MONITORS - comma-separated extra URLs to ping (optional)
+  RUN_KEEPALIVE_IN_WORKERS - "1" to allow thread to start in each worker (default "1")
 
-If GITHUB_TOKEN and GITHUB_REPO are provided, the app will attempt
-to read/write the DB file from GitHub. If that fails it will fall back
-to a local `data.json` file in the project root.
+Behavior:
+- If GITHUB_TOKEN + GITHUB_REPO are set and GitHub reachable -> reads/writes DB on GitHub (DB_PATH).
+- If GitHub not configured or write fails -> falls back to local data.json.
+- Keep-alive background thread pings APP_URL (and optional monitors) at configured interval.
 """
 import os
 import json
 import base64
 import datetime
 import uuid
+import threading
+import time
 from pathlib import Path
 from functools import wraps
 
@@ -115,6 +123,11 @@ DEFAULT_DATA = {
     "prayers": []
 }
 
+START_TIME = datetime.datetime.utcnow()
+app.config.setdefault("KEEPALIVE_RUNNING", False)
+app.config.setdefault("LAST_PINGS", {})
+app.config.setdefault("GITHUB_SHA", None)
+
 def now():
     return datetime.datetime.utcnow().isoformat() + "Z"
 
@@ -142,6 +155,7 @@ def load_data():
                     json.dump(db, f, indent=2, ensure_ascii=False)
             except Exception:
                 pass
+            app.config["GITHUB_SHA"] = _GITHUB_SHA
             return db
 
     # Fallback to local file
@@ -187,6 +201,7 @@ def save_data(data):
                     json.dump(data, f, indent=2, ensure_ascii=False)
             except Exception:
                 pass
+            app.config["GITHUB_SHA"] = _GITHUB_SHA
             return True
         else:
             # fallback to local file
@@ -218,6 +233,7 @@ def staff_or_admin_allowed(check_perm_name=None):
     def outer(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
+            # admin always allowed
             if session.get("admin_id"):
                 return fn(*args, **kwargs)
 
@@ -601,6 +617,81 @@ def staff_me():
             return jsonify({"ok": True, "staff": {"id": s["id"], "name": s["name"], "role": s.get("role",""), "perms": s.get("perms",{}), "contact": s.get("contact","")}})
     return jsonify({"ok": False, "staff": None})
 
+# ------------------ health & keep-alive ------------------
+
+@app.route("/api/health")
+def api_health():
+    uptime = (datetime.datetime.utcnow() - START_TIME).total_seconds()
+    return jsonify({
+        "ok": True,
+        "uptime_seconds": int(uptime),
+        "github_sha": app.config.get("GITHUB_SHA"),
+        "keepalive_running": app.config.get("KEEPALIVE_RUNNING", False),
+        "last_pings": app.config.get("LAST_PINGS", {})
+    })
+
+def keepalive_worker(self_url, monitors, interval_seconds):
+    """
+    Background loop: ping self_url and extra monitors every interval_seconds.
+    Stores last success/failure timestamps in app.config["LAST_PINGS"].
+    """
+    app.logger.info(f"keepalive_worker starting: self_url={self_url} monitors={monitors} interval={interval_seconds}s")
+    app.config["KEEPALIVE_RUNNING"] = True
+    session_req = requests.Session()
+    headers = {"User-Agent": "TomorrowAI-KeepAlive/1"}
+    targets = [self_url] + monitors
+    while True:
+        for t in targets:
+            try:
+                r = session_req.get(t, headers=headers, timeout=15)
+                app.config["LAST_PINGS"][t] = {"ok": r.status_code == 200, "status_code": r.status_code, "at": now()}
+                app.logger.debug(f"keepalive ping {t} -> {r.status_code}")
+            except Exception as e:
+                app.config["LAST_PINGS"][t] = {"ok": False, "error": str(e), "at": now()}
+                app.logger.warning(f"keepalive ping failed {t}: {e}")
+        time.sleep(interval_seconds)
+
+def start_keepalive_in_thread():
+    # Only start if enabled
+    try:
+        enabled = os.getenv("KEEPALIVE_ENABLED", "1") == "1"
+        if not enabled:
+            app.logger.info("KEEPALIVE_ENABLED != 1 -> not starting keepalive.")
+            return
+        try:
+            interval = int(os.getenv("KEEPALIVE_INTERVAL", str(1200)))  # default 20 minutes
+            if interval < 60:
+                interval = 60
+        except Exception:
+            interval = 1200
+        app_url = os.getenv("APP_URL")
+        port = int(os.getenv("PORT", "4001"))
+        if app_url:
+            self_url = app_url.rstrip("/") + "/"
+        else:
+            self_url = f"http://127.0.0.1:{port}/"
+        monitors_raw = os.getenv("UPTIME_MONITORS", "")
+        monitors = [m.strip() for m in monitors_raw.split(",") if m.strip()]
+        # If already running, don't start again
+        if app.config.get("KEEPALIVE_RUNNING"):
+            app.logger.info("Keepalive already running in this process.")
+            return
+        thr = threading.Thread(target=keepalive_worker, args=(self_url, monitors, interval), daemon=True)
+        thr.start()
+        app.logger.info("keepalive thread started.")
+    except Exception as e:
+        app.logger.warning(f"failed to start keepalive: {e}")
+
+# Ensure the keepalive starts in WSGI workers too (best-effort)
+@app.before_first_request
+def _start_keepalive_before_first_request():
+    # Respect RUN_KEEPALIVE_IN_WORKERS env var (default allow)
+    run_in_workers = os.getenv("RUN_KEEPALIVE_IN_WORKERS", "1") == "1"
+    if run_in_workers:
+        start_keepalive_in_thread()
+    else:
+        app.logger.info("RUN_KEEPALIVE_IN_WORKERS != 1 -> skipping keepalive in worker.")
+
 # ------------------ start ------------------
 
 if __name__ == "__main__":
@@ -618,6 +709,9 @@ if __name__ == "__main__":
             except Exception:
                 pass
             _GITHUB_SHA = sha
+            app.config["GITHUB_SHA"] = _GITHUB_SHA
 
     port = int(os.getenv("PORT", 4001))
+    # start keepalive immediately when running directly
+    start_keepalive_in_thread()
     app.run(host="0.0.0.0", port=port, debug=True)
