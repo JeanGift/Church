@@ -124,7 +124,9 @@ DEFAULT_DATA = {
 }
 
 START_TIME = datetime.datetime.utcnow()
-app.config.setdefault("KEEPALIVE_RUNNING", False)
+# flags / status
+app.config.setdefault("KEEPALIVE_RUNNING", False)   # set by worker loop while running
+app.config.setdefault("KEEPALIVE_STARTED", False)   # set once we start thread in this process
 app.config.setdefault("LAST_PINGS", {})
 app.config.setdefault("GITHUB_SHA", None)
 
@@ -672,25 +674,27 @@ def start_keepalive_in_thread():
             self_url = f"http://127.0.0.1:{port}/"
         monitors_raw = os.getenv("UPTIME_MONITORS", "")
         monitors = [m.strip() for m in monitors_raw.split(",") if m.strip()]
-        # If already running, don't start again
-        if app.config.get("KEEPALIVE_RUNNING"):
-            app.logger.info("Keepalive already running in this process.")
+        # If already started in this process, skip
+        if app.config.get("KEEPALIVE_STARTED"):
+            app.logger.info("Keepalive already started in this process.")
             return
         thr = threading.Thread(target=keepalive_worker, args=(self_url, monitors, interval), daemon=True)
         thr.start()
+        app.config["KEEPALIVE_STARTED"] = True
         app.logger.info("keepalive thread started.")
     except Exception as e:
         app.logger.warning(f"failed to start keepalive: {e}")
 
-# Ensure the keepalive starts in WSGI workers too (best-effort)
-@app.before_first_request
-def _start_keepalive_before_first_request():
+# Some Flask installations don't expose before_first_request; use before_request with a guard
+@app.before_request
+def _ensure_keepalive_started_on_first_request():
     # Respect RUN_KEEPALIVE_IN_WORKERS env var (default allow)
     run_in_workers = os.getenv("RUN_KEEPALIVE_IN_WORKERS", "1") == "1"
-    if run_in_workers:
+    if not run_in_workers:
+        return
+    # Start keepalive on first real request (safe for Gunicorn worker processes)
+    if not app.config.get("KEEPALIVE_STARTED"):
         start_keepalive_in_thread()
-    else:
-        app.logger.info("RUN_KEEPALIVE_IN_WORKERS != 1 -> skipping keepalive in worker.")
 
 # ------------------ start ------------------
 
