@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Church Hub — Finance</title>
+  <meta name="theme-color" content="#f59e0b" />
+  <style>
+    :root{
+      --bg:#fffaf0; --card:#ffffff; --muted:#6b7280; --text:#071028;
+      --accent:#f59e0b; --accent-2:#f97316; --radius:12px; --shadow: 0 10px 30px rgba(6,8,15,0.06);
+      --max:1100px; --font:Inter,system-ui,Arial;
+    }
+    html,body{margin:0;font-family:var(--font);background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased}
+    .wrap{max-width:var(--max);margin:18px auto;padding:14px}
+    header{display:flex;justify-content:space-between;align-items:center;gap:12px}
+    h1{margin:0;font-size:20px}
+    .muted{color:var(--muted);font-size:14px}
+    .controls{display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap}
+    input,select,button{padding:10px;border-radius:10px;border:1px solid rgba(2,6,23,0.06);font-size:14px}
+    button{background:linear-gradient(90deg,var(--accent),var(--accent-2));border:0;color:#fff;font-weight:700}
+    .muted-btn{background:transparent;border:1px solid rgba(2,6,23,0.06);padding:10px;border-radius:10px}
+    .card{background:var(--card);border-radius:var(--radius);padding:12px;box-shadow:var(--shadow);margin-top:12px;border:1px solid rgba(2,6,23,0.03)}
+    table{width:100%;border-collapse:collapse;margin-top:10px}
+    th,td{padding:10px;border-bottom:1px solid rgba(2,6,23,0.05);text-align:left;font-size:14px}
+    .totals{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px}
+    .total-card{background:#fff;padding:10px;border-radius:10px;box-shadow:var(--shadow);min-width:180px}
+    .download-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+    @media(max-width:720px){ .totals{flex-direction:column} }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>Finance Dashboard</h1>
+        <div class="muted">Public, read-only — contributions & donations. Admins manage data from the Admin panel.</div>
+      </div>
+      <div>
+        <a href="/" style="text-decoration:none;color:inherit" class="muted">← Home</a>
+      </div>
+    </header>
+
+    <div class="controls">
+      <label>Category:
+        <select id="filterCategory">
+          <option value="">All</option>
+          <option value="tithe">Tithe</option>
+          <option value="offering">Offering</option>
+          <option value="pledge">Pledge</option>
+          <option value="special">Special</option>
+          <option value="other">Other</option>
+        </select>
+      </label>
+
+      <label>From: <input id="filterFrom" type="date" /></label>
+      <label>To: <input id="filterTo" type="date" /></label>
+
+      <label>Group by:
+        <select id="groupBy">
+          <option value="none">None</option>
+          <option value="category">Category</option>
+          <option value="month">Month</option>
+          <option value="year">Year</option>
+        </select>
+      </label>
+
+      <button id="btnApply">Apply</button>
+      <button id="btnReset" class="muted-btn">Reset</button>
+    </div>
+
+    <div class="card" id="summaryCard">
+      <strong>Summary</strong>
+      <div class="totals" id="totalsRow" aria-live="polite"></div>
+
+      <div class="download-row" style="margin-top:10px">
+        <button id="downloadContribCsv">Download contributions CSV</button>
+        <button id="downloadDonCsv">Download donations CSV</button>
+        <button id="downloadCombinedCsv" class="muted-btn">Download combined CSV</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <strong>Contributions (tithes / offerings / pledges)</strong>
+      <div class="muted">Latest records shown below. Use filters above to narrow by category / date.</div>
+      <table id="contribTable" aria-live="polite">
+        <thead>
+          <tr><th>Date</th><th>Name</th><th>Category</th><th>Amount</th><th>Note</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <strong>Donations (legacy donation records)</strong>
+      <div class="muted">Other donation entries</div>
+      <table id="donTable">
+        <thead><tr><th>Date</th><th>Name</th><th>Amount</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <strong>Aggregated totals</strong>
+      <div class="muted">Totals broken down by grouping. You can download CSV for the grouped totals.</div>
+
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+        <button id="downloadGroupedCsv">Download grouped totals CSV</button>
+        <button id="downloadMonthlyCsv" class="muted-btn">Download monthly totals CSV</button>
+        <button id="downloadYearlyCsv" class="muted-btn">Download yearly totals CSV</button>
+      </div>
+
+      <div id="groupedView" style="margin-top:12px" class="muted"></div>
+
+      <div id="monthlyView" style="margin-top:12px"></div>
+      <div id="yearlyView" style="margin-top:12px"></div>
+    </div>
+
+    <footer style="margin-top:18px" class="muted">This page is public read-only. Admins manage finance via Admin panel.</footer>
+  </div>
+
+<script>
+  // Utilities
+  function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function safeNum(v){ const n = parseFloat(v); return Number.isFinite(n) ? n : 0; }
+  function currency(n){ return 'KES ' + Number(n).toFixed(2); }
+  function fmtDateInput(s){
+    if(!s) return '';
+    const d = new Date(s);
+    if(Number.isNaN(d.getTime())) return s;
+    return d.toISOString().slice(0,10);
+  }
+  function nowISO(){ return new Date().toISOString(); }
+
+  // CSV utilities
+  function toCsv(rows, headers){
+    // headers = array of {key, title}
+    const esc = v => {
+      if (v == null) return '';
+      const s = String(v);
+      if (s.includes('"') || s.includes(',') || s.includes('\n')) {
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+      return s;
+    };
+    const headLine = headers.map(h => esc(h.title)).join(',');
+    const lines = rows.map(r => headers.map(h => esc(r[h.key])).join(','));
+    return [headLine].concat(lines).join('\r\n');
+  }
+  function downloadCsv(filename, content){
+    const blob = new Blob([content], {type: 'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 1000);
+  }
+
+  // Data fetch
+  async function fetchPublic(){
+    const r = await fetch('/api/public');
+    if(!r.ok) throw new Error('Failed to fetch public data');
+    return await r.json();
+  }
+
+  function filterRecords(records, from, to, category){
+    return (records || []).filter(r=>{
+      // use r.date if present else r.created_at
+      const raw = r.date || r.created_at || r.createdAt || '';
+      const dt = raw ? new Date(raw) : null;
+      if(from){
+        const f = new Date(from + 'T00:00:00');
+        if(!dt || dt < f) return false;
+      }
+      if(to){
+        const t = new Date(to + 'T23:59:59');
+        if(!dt || dt > t) return false;
+      }
+      if(category && (String(r.category||r.type||'').toLowerCase() !== category.toLowerCase())) return false;
+      return true;
+    });
+  }
+
+  function groupKeyFor(record, groupBy){
+    if(groupBy === 'category') return (record.category || record.type || 'other');
+    if(groupBy === 'month'){
+      const d = new Date(record.date || record.created_at || Date.now());
+      if(Number.isNaN(d.getTime())) return 'unknown';
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    }
+    if(groupBy === 'year'){
+      const d = new Date(record.date || record.created_at || Date.now());
+      if(Number.isNaN(d.getTime())) return 'unknown';
+      return `${d.getFullYear()}`;
+    }
+    return 'all';
+  }
+
+  function aggregate(records, keyFn){
+    const map = {};
+    (records||[]).forEach(r=>{
+      const k = keyFn(r);
+      map[k] = (map[k] || 0) + safeNum(r.amount);
+    });
+    return map;
+  }
+
+  // Render functions
+  function renderTotals(totalContrib, totalDon){
+    const row = document.getElementById('totalsRow');
+    row.innerHTML = '';
+    const cdiv = document.createElement('div'); cdiv.className='total-card';
+    cdiv.innerHTML = `<div class="muted">Total contributions</div><div style="font-weight:800;margin-top:6px">${currency(totalContrib)}</div>`;
+    const ddiv = document.createElement('div'); ddiv.className='total-card';
+    ddiv.innerHTML = `<div class="muted">Total donations</div><div style="font-weight:800;margin-top:6px">${currency(totalDon)}</div>`;
+    const comb = document.createElement('div'); comb.className='total-card';
+    comb.innerHTML = `<div class="muted">Combined total</div><div style="font-weight:800;margin-top:6px">${currency(totalContrib + totalDon)}</div>`;
+    row.appendChild(cdiv); row.appendChild(ddiv); row.appendChild(comb);
+  }
+
+  function renderContribTable(rows){
+    const tbody = document.querySelector('#contribTable tbody');
+    tbody.innerHTML = '';
+    if(!rows || rows.length === 0){
+      tbody.innerHTML = '<tr><td colspan="5" class="muted">No contributions</td></tr>';
+      return;
+    }
+    rows.forEach(r=>{
+      const date = fmtDateInput(r.date || r.created_at || '');
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${escapeHtml(date)}</td><td>${escapeHtml(r.name || '')}</td><td>${escapeHtml(r.category || r.type || '')}</td><td>${currency(safeNum(r.amount))}</td><td>${escapeHtml(r.note || '')}</td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderDonTable(rows){
+    const tbody = document.querySelector('#donTable tbody');
+    tbody.innerHTML = '';
+    if(!rows || rows.length === 0){
+      tbody.innerHTML = '<tr><td colspan="3" class="muted">No donations</td></tr>';
+      return;
+    }
+    rows.forEach(r=>{
+      const date = fmtDateInput(r.created_at || r.date || '');
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${escapeHtml(date)}</td><td>${escapeHtml(r.name || '')}</td><td>${currency(safeNum(r.amount))}</td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderGroupedView(map){
+    const el = document.getElementById('groupedView');
+    const keys = Object.keys(map).sort();
+    if(keys.length === 0){ el.innerHTML = '<div class="muted">No grouped totals</div>'; return; }
+    const html = keys.map(k=>`<div style="padding:6px 0"><strong>${escapeHtml(k)}</strong> — ${currency(map[k])}</div>`).join('');
+    el.innerHTML = html;
+  }
+
+  function renderMonthlyAndYearly(contribs, donations){
+    // build month/year aggregates for contributions + donations separately and combined
+    const byMonth = {}; // YYYY-MM key -> {contrib,donation,combined}
+    const byYear = {};  // YYYY -> totals
+    function add(map, key, type, amount){
+      map[key] = map[key] || { contrib:0, donation:0 };
+      map[key][type] += amount;
+    }
+    (contribs||[]).forEach(c=>{
+      const d = new Date(c.date || c.created_at || Date.now());
+      if(Number.isNaN(d.getTime())) return;
+      const month = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      const year = `${d.getFullYear()}`;
+      add(byMonth, month, 'contrib', safeNum(c.amount));
+      add(byYear, year, 'contrib', safeNum(c.amount));
+    });
+    (donations||[]).forEach(don=>{
+      const d = new Date(don.created_at || don.date || Date.now());
+      if(Number.isNaN(d.getTime())) return;
+      const month = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      const year = `${d.getFullYear()}`;
+      add(byMonth, month, 'donation', safeNum(don.amount));
+      add(byYear, year, 'donation', safeNum(don.amount));
+    });
+
+    // compute combined
+    Object.keys(byMonth).forEach(k => byMonth[k].combined = (byMonth[k].contrib || 0) + (byMonth[k].donation || 0));
+    Object.keys(byYear).forEach(k => byYear[k].combined = (byYear[k].contrib || 0) + (byYear[k].donation || 0));
+
+    const mEl = document.getElementById('monthlyView');
+    const yEl = document.getElementById('yearlyView');
+
+    if(Object.keys(byMonth).length === 0) mEl.innerHTML = '<div class="muted">No monthly data</div>';
+    else {
+      const rows = Object.keys(byMonth).sort().map(k => `<div style="padding:6px 0"><strong>${escapeHtml(k)}</strong> • contributions: ${currency(byMonth[k].contrib)} • donations: ${currency(byMonth[k].donation)} • total: ${currency(byMonth[k].combined)}</div>`).join('');
+      mEl.innerHTML = `<strong>Monthly totals</strong><div style="margin-top:8px">${rows}</div>`;
+    }
+
+    if(Object.keys(byYear).length === 0) yEl.innerHTML = '<div class="muted">No yearly data</div>';
+    else {
+      const rows = Object.keys(byYear).sort().map(k => `<div style="padding:6px 0"><strong>${escapeHtml(k)}</strong> • contributions: ${currency(byYear[k].contrib)} • donations: ${currency(byYear[k].donation)} • total: ${currency(byYear[k].combined)}</div>`).join('');
+      yEl.innerHTML = `<strong>Yearly totals</strong><div style="margin-top:8px">${rows}</div>`;
+    }
+
+    return { byMonth, byYear };
+  }
+
+  // Main apply logic + CSV download handlers
+  async function applyFilters(){
+    try{
+      const category = document.getElementById('filterCategory').value;
+      const from = document.getElementById('filterFrom').value;
+      const to = document.getElementById('filterTo').value;
+      const groupBy = document.getElementById('groupBy').value;
+
+      const data = await fetchPublic();
+      // contributions may be in data.contributions (we used this name earlier), or data.contributions might be undefined
+      const contributions = Array.isArray(data.contributions) ? data.contributions : (data.contribution || []);
+      const donations = Array.isArray(data.donations) ? data.donations : (data.donation || []);
+
+      const contribFiltered = filterRecords(contributions, from, to, category);
+      const donFiltered = filterRecords(donations, from, to, '');
+
+      const totalContrib = contribFiltered.reduce((s,c)=>s + safeNum(c.amount), 0);
+      const totalDon = donFiltered.reduce((s,d)=>s + safeNum(d.amount), 0);
+
+      renderTotals(totalContrib, totalDon);
+      renderContribTable(contribFiltered);
+      renderDonTable(donFiltered);
+
+      // grouped view (only for contributions)
+      if(groupBy === 'none'){
+        document.getElementById('groupedView').innerHTML = '';
+      } else {
+        const agg = aggregate(contribFiltered, r => groupKeyFor(r, groupBy));
+        renderGroupedView(agg);
+      }
+
+      // monthly / yearly totals (combined contributions + donations)
+      const { byMonth, byYear } = renderMonthlyAndYearly(contribFiltered, donFiltered);
+
+      // Prepare CSV generator closures (for download buttons)
+      document.getElementById('downloadContribCsv').onclick = function(){
+        const headers = [
+          {key:'date', title: 'date'},
+          {key:'name', title: 'name'},
+          {key:'category', title: 'category'},
+          {key:'amount', title: 'amount'},
+          {key:'note', title: 'note'}
+        ];
+        // normalize rows
+        const rows = (contribFiltered || []).map(r => ({
+          date: fmtDateInput(r.date || r.created_at || ''),
+          name: r.name || '',
+          category: r.category || r.type || '',
+          amount: Number(safeNum(r.amount)).toFixed(2),
+          note: r.note || ''
+        }));
+        const csv = toCsv(rows, headers);
+        downloadCsv(`contributions_${fmtDateInput(from)||'all'}_${fmtDateInput(to)||'all'}.csv`, csv);
+      };
+
+      document.getElementById('downloadDonCsv').onclick = function(){
+        const headers = [
+          {key:'date', title:'date'},
+          {key:'name', title:'name'},
+          {key:'amount', title:'amount'}
+        ];
+        const rows = (donFiltered || []).map(r => ({ date: fmtDateInput(r.created_at || r.date || ''), name: r.name || '', amount: Number(safeNum(r.amount)).toFixed(2) }));
+        const csv = toCsv(rows, headers);
+        downloadCsv(`donations_${fmtDateInput(from)||'all'}_${fmtDateInput(to)||'all'}.csv`, csv);
+      };
+
+      document.getElementById('downloadCombinedCsv').onclick = function(){
+        // combined contributions + donations in single CSV with a "source" column
+        const headers = [
+          {key:'date', title:'date'},
+          {key:'source', title:'source'},
+          {key:'name', title:'name'},
+          {key:'category', title:'category'},
+          {key:'amount', title:'amount'},
+          {key:'note', title:'note'}
+        ];
+        const contribRows = (contribFiltered || []).map(r => ({ date: fmtDateInput(r.date || r.created_at || ''), source: 'contribution', name: r.name || '', category: r.category || r.type || '', amount: Number(safeNum(r.amount)).toFixed(2), note: r.note || '' }));
+        const donRows = (donFiltered || []).map(r => ({ date: fmtDateInput(r.created_at || r.date || ''), source: 'donation', name: r.name || '', category: '', amount: Number(safeNum(r.amount)).toFixed(2), note: '' }));
+        const csv = toCsv(contribRows.concat(donRows), headers);
+        downloadCsv(`combined_finance_${fmtDateInput(from)||'all'}_${fmtDateInput(to)||'all'}.csv`, csv);
+      };
+
+      document.getElementById('downloadGroupedCsv').onclick = function(){
+        // grouped by current groupBy value; aggregate contributions only
+        const gb = groupBy || 'none';
+        if(gb === 'none'){ alert('Choose a grouping (Category / Month / Year) before downloading grouped totals.'); return; }
+        const agg = aggregate(contribFiltered, r => groupKeyFor(r, gb));
+        const headers = [{key:'group', title: gb}, {key:'amount', title: 'amount'}];
+        const rows = Object.keys(agg).sort().map(k => ({ group: k, amount: Number(agg[k]).toFixed(2) }));
+        const csv = toCsv(rows, headers);
+        downloadCsv(`grouped_${gb}_${fmtDateInput(from)||'all'}_${fmtDateInput(to)||'all'}.csv`, csv);
+      };
+
+      document.getElementById('downloadMonthlyCsv').onclick = function(){
+        const months = (typeof byMonth !== 'undefined') ? byMonth : {};
+        const headers = [{key:'month', title:'month'}, {key:'contributions', title:'contributions'}, {key:'donations', title:'donations'}, {key:'total', title:'total'}];
+        const rows = Object.keys(months).sort().map(k => ({ month: k, contributions: Number(months[k].contrib || 0).toFixed(2), donations: Number(months[k].donation || 0).toFixed(2), total: Number(months[k].combined || 0).toFixed(2) }));
+        const csv = toCsv(rows, headers);
+        downloadCsv(`monthly_totals_${fmtDateInput(from)||'all'}_${fmtDateInput(to)||'all'}.csv`, csv);
+      };
+
+      document.getElementById('downloadYearlyCsv').onclick = function(){
+        const years = (typeof byYear !== 'undefined') ? byYear : {};
+        const headers = [{key:'year', title:'year'}, {key:'contributions', title:'contributions'}, {key:'donations', title:'donations'}, {key:'total', title:'total'}];
+        const rows = Object.keys(years).sort().map(k => ({ year: k, contributions: Number(years[k].contrib || 0).toFixed(2), donations: Number(years[k].donation || 0).toFixed(2), total: Number(years[k].combined || 0).toFixed(2) }));
+        const csv = toCsv(rows, headers);
+        downloadCsv(`yearly_totals_${fmtDateInput(from)||'all'}_${fmtDateInput(to)||'all'}.csv`, csv);
+      };
+
+    }catch(err){
+      console.error(err);
+      document.getElementById('contribTable').querySelector('tbody').innerHTML = '<tr><td colspan="5" class="muted">Unable to load contributions</td></tr>';
+      document.getElementById('donTable').querySelector('tbody').innerHTML = '<tr><td colspan="3" class="muted">Unable to load donations</td></tr>';
+      document.getElementById('groupedView').innerHTML = '<div class="muted">Error loading grouped totals</div>';
+    }
+  }
+
+  // attach apply/reset buttons
+  document.getElementById('btnApply').addEventListener('click', applyFilters);
+  document.getElementById('btnReset').addEventListener('click', () => {
+    document.getElementById('filterCategory').value = '';
+    document.getElementById('filterFrom').value = '';
+    document.getElementById('filterTo').value = '';
+    document.getElementById('groupBy').value = 'none';
+    applyFilters();
+  });
+
+  // initial load
+  (async function init(){ try{ await applyFilters(); }catch(e){ console.error(e); } })();
+</script>
+</body>
+</html>
