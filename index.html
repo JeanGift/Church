@@ -62,6 +62,16 @@
       </div>
     </header>
 
+<link rel="manifest" href="/manifest.json">
+
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js')
+    .then(() => console.log("Service Worker registered"))
+    .catch(err => console.error("SW failed", err));
+}
+</script>
+
     <!-- Tiles -->
     <section class="grid" aria-label="Hub">
       <a class="tile" href="#membersCard" onclick="document.getElementById('membersCard').scrollIntoView({behavior:'smooth'})">
@@ -98,6 +108,13 @@
         <div class="icon-wrap"><div class="icon-circle" style="background:linear-gradient(135deg,#0ea5a4,#06b6d4)">R</div></div>
         <div class="label" data-i18n="resources">Resources</div>
         <div class="sub" id="resourcesCount">—</div>
+      </a>
+
+      <!-- FINANCE tile -->
+      <a class="tile" href="/finance">
+        <div class="icon-wrap"><div class="icon-circle" style="background:linear-gradient(135deg,#f59e0b,#f97316)">£</div></div>
+        <div class="label">Finance</div>
+        <div class="sub" id="financeSub">View contributions & totals</div>
       </a>
     </section>
 
@@ -136,6 +153,17 @@
     <section id="resourcesCard" class="card">
       <h3>Resources</h3>
       <div class="list" id="resourcesList"></div>
+    </section>
+
+    <!-- Finance quick summary -->
+    <section id="financeCard" class="card">
+      <h3>Finance</h3>
+      <div class="muted">Quick view — go to the finance dashboard for full reports.</div>
+      <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
+        <div class="item" style="min-width:160px"><div class="label">Total donations</div><div class="muted" id="totalDonations">—</div></div>
+        <div class="item" style="min-width:160px"><div class="label">Total contributions</div><div class="muted" id="totalContributions">—</div></div>
+        <a class="cta" href="/finance">Open Finance</a>
+      </div>
     </section>
 
     <section class="card" style="text-align:center">
@@ -224,6 +252,14 @@
         const resourcesList = document.getElementById('resourcesList');
         resourcesList.innerHTML = (j.resources||[]).length ? j.resources.map(r => `<div class="item"><strong>${escapeHtml(r.title)}</strong>${r.url?`<div class="muted" style="margin-top:6px"><a href="${escapeHtml(r.url)}" target="_blank">${escapeHtml(r.url)}</a></div>`:''}</div>`).join('') : '<div class="muted">No resources</div>';
 
+        // finance quick totals
+        const contributions = j.contributions || [];
+        const donations = j.donations || [];
+        const totalContrib = contributions.reduce((s, c) => s + (parseFloat(c.amount)||0), 0);
+        const totalDon = donations.reduce((s, d) => s + (parseFloat(d.amount)||0), 0);
+        document.getElementById('totalContributions').textContent = (totalContrib>0) ? `KES ${totalContrib.toFixed(2)}` : 'No contributions';
+        document.getElementById('totalDonations').textContent = (totalDon>0) ? `KES ${totalDon.toFixed(2)}` : 'No donations';
+
         // prepare attendance default date and render
         const viewDate = document.getElementById('viewDate');
         if(!viewDate.value){
@@ -251,15 +287,8 @@
       }).join('');
     }
 
-    document.getElementById('viewDate').addEventListener('change', async ()=>{
-      try{ const r = await fetch('/api/public'); const j = await r.json(); renderAttendance(j); }catch(e){ console.warn(e); }
-    });
-
-    document.getElementById('btnNearest').addEventListener('click', ()=>{
-      const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() - d.getDay()); document.getElementById('viewDate').value = d.toISOString().slice(0,10);
-      // reload and render
-      loadPublic();
-    });
+    document.getElementById('viewDate').addEventListener('change', async ()=>{ try{ const r = await fetch('/api/public'); const j = await r.json(); renderAttendance(j); }catch(e){ console.warn(e); } });
+    document.getElementById('btnNearest').addEventListener('click', ()=>{ const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() - d.getDay()); document.getElementById('viewDate').value = d.toISOString().slice(0,10); loadPublic(); });
 
     // initial load
     loadPublic();
