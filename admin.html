@@ -46,6 +46,13 @@
   footer{margin-top:12px;text-align:center;color:var(--muted);font-size:13px}
   table{width:100%;border-collapse:collapse}
   th,td{padding:8px;border-bottom:1px solid rgba(2,6,23,0.04);text-align:left;font-size:14px}
+
+  /* modal */
+  .modal-backdrop{ position:fixed; left:0; top:0; right:0; bottom:0; background:rgba(6,8,15,0.4); display:none; align-items:center; justify-content:center; z-index:9999; }
+  .modal{ background:#fff; border-radius:12px; padding:16px; width:92%; max-width:720px; box-shadow:0 24px 60px rgba(6,8,15,0.16);}
+  .modal h3{margin:0 0 8px 0}
+  .modal .row{flex-direction:column}
+  .modal .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
 </style>
 </head>
 <body>
@@ -98,7 +105,7 @@
       <div>
         <div class="panel">
           <strong id="membersH">Members</strong>
-          <div class="muted small">Add members (name + gender). Members show in public index.</div>
+          <div class="muted small">Add & edit members (name + gender). Members show in public index.</div>
           <div style="margin-top:10px;display:grid;gap:8px">
             <div class="row">
               <input id="memberName" class="col" placeholder="Full name" />
@@ -140,11 +147,11 @@
         </div>
       </div>
 
-      <!-- RIGHT COLUMN: content & prayers & staff & finance -->
+      <!-- RIGHT COLUMN: post content (editable) & prayers & staff & finance -->
       <div>
         <div class="panel">
           <strong>Post content</strong>
-          <div class="muted small">Post Bible study, Events, Announcements (summons), or Resources for the public index.</div>
+          <div class="muted small">Post Bible study, Events, Announcements (summons), or Resources for the public index. You can edit or delete existing posts here.</div>
           <div style="margin-top:10px;display:grid;gap:8px">
             <input id="contentTitleInput" placeholder="Title" />
             <input id="contentSubInput" placeholder="Date / Passage / Location / URL" />
@@ -156,11 +163,36 @@
               <button id="btnPostResource" style="background:#0ea5a4">Add resource</button>
             </div>
           </div>
+
+          <!-- Editable lists for each collection -->
+          <div style="margin-top:12px">
+            <strong style="display:block;margin-bottom:8px">Manage posted content</strong>
+
+            <div style="margin-top:8px">
+              <div style="font-weight:700">Events</div>
+              <div id="eventsListEditable" class="list"></div>
+            </div>
+
+            <div style="margin-top:8px">
+              <div style="font-weight:700">Announcements</div>
+              <div id="summonsListEditable" class="list"></div>
+            </div>
+
+            <div style="margin-top:8px">
+              <div style="font-weight:700">Bible studies</div>
+              <div id="bibleListEditable" class="list"></div>
+            </div>
+
+            <div style="margin-top:8px">
+              <div style="font-weight:700">Resources</div>
+              <div id="resourcesListEditable" class="list"></div>
+            </div>
+          </div>
         </div>
 
         <div class="panel" style="margin-top:12px">
           <strong>Donations</strong>
-          <div class="muted small">Add donation records quickly.</div>
+          <div class="muted small">Add & edit donation records quickly.</div>
           <div style="margin-top:8px;display:flex;gap:8px">
             <input id="donorName" class="col" placeholder="Donor" />
             <input id="donAmount" placeholder="Amount" style="width:140px" />
@@ -245,6 +277,20 @@
     <footer>© Church Hub — Local demo</footer>
   </div>
 
+  <!-- Edit modal (reused for members, events, summons, bible, resources, donations) -->
+  <div id="modalBackdrop" class="modal-backdrop" role="dialog" aria-modal="true">
+    <div class="modal" role="document">
+      <h3 id="modalTitle">Edit</h3>
+      <div id="modalBody" style="display:grid;gap:8px">
+        <!-- dynamic fields inserted here -->
+      </div>
+      <div class="actions">
+        <button id="modalSave">Save</button>
+        <button id="modalCancel" class="muted-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
 <script>
 // Lightweight admin front-end (mobile-first). Uses same endpoints in your app.py.
 const api = async (path, opts={}) => {
@@ -256,12 +302,15 @@ const api = async (path, opts={}) => {
   const txt = await res.text(); try{ return JSON.parse(txt); }catch(e){ return txt; }
 };
 
-function toast(msg, t=1800){ const id='__toast__'; let el=document.getElementById(id); if(!el){ el=document.createElement('div'); el.id=id; el.style.position='fixed'; el.style.right='14px'; el.style.bottom='14px'; el.style.padding='10px 12px'; el.style.background='#071028'; el.style.color='white'; el.style.borderRadius='10px'; document.body.appendChild(el);} el.textContent=msg; el.style.display='block'; setTimeout(()=>el.style.display='none',t);} 
+function toast(msg, t=1600){ const id='__toast__'; let el=document.getElementById(id); if(!el){ el=document.createElement('div'); el.id=id; el.style.position='fixed'; el.style.right='14px'; el.style.bottom='14px'; el.style.padding='10px 12px'; el.style.background='#071028'; el.style.color='white'; el.style.borderRadius='10px'; el.style.zIndex=99999; document.body.appendChild(el);} el.textContent=msg; el.style.display='block'; setTimeout(()=>el.style.display='none',t);} 
 
 // i18n buttons
 document.getElementById('langEn').addEventListener('click', ()=>{ localStorage.setItem('ch_lang','en'); document.getElementById('langEn').classList.add('active'); document.getElementById('langSw').classList.remove('active'); });
 document.getElementById('langSw').addEventListener('click', ()=>{ localStorage.setItem('ch_lang','sw'); document.getElementById('langSw').classList.add('active'); document.getElementById('langEn').classList.remove('active'); });
 if(localStorage.getItem('ch_lang')==='sw') document.getElementById('langSw').classList.add('active'); else document.getElementById('langEn').classList.add('active');
+
+// small helper
+function escape(s){ return String(s||'').replace(/[&<>\"']/g, c => ({'&':'&amp;','<' :'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 // AUTH flow (register first admin if missing)
 async function adminExists(){ try{ const r = await fetch('/api/admin/exists'); const j = await r.json(); return j.exists; }catch(e){ return true; } }
@@ -287,19 +336,74 @@ document.getElementById('logoutBtn').addEventListener('click', async ()=>{ try{ 
 
 function afterLogin(name){ document.getElementById('authWrap').style.display='none'; document.getElementById('dashboard').classList.remove('hidden'); document.getElementById('logoutBtn').classList.remove('hidden'); refreshAll(); }
 
-// MEMBERS
-async function loadMembers(){ try{ const j = await api('/api/admin/members'); const el=document.getElementById('membersList'); el.innerHTML = j.length? j.map(m=>`<div class="item"><div><div class="label">${escape(m.name)}</div><div class="muted">${m.gender||''}</div></div><div><button class="muted-btn" onclick="removeMember('${m.id}')">Remove</button></div></div>`).join(''):'<div class="muted">No members yet</div>'; }catch(e){ console.warn(e); try{ const pub = await api('/api/public'); const members=pub.members||[]; document.getElementById('membersList').innerHTML = members.length? members.map(m=>`<div class="item"><div><div class="label">${escape(m.name)}</div><div class="muted">${m.gender||''}</div></div></div>`).join('') : '<div class="muted">No members yet</div>'; }catch(ee){ document.getElementById('membersList').innerHTML = '<div class="muted">Unable to load</div>'; } } }
+// ---------- MEMBERS (add/edit/delete) ----------
+async function loadMembers(){
+  try{
+    const j = await api('/api/admin/members');
+    const el = document.getElementById('membersList');
+    el.innerHTML = j.length ? j.map(m=>`
+      <div class="item">
+        <div><div class="label">${escape(m.name)}</div><div class="muted">${escape(m.gender||'')}</div></div>
+        <div style="display:flex;gap:8px">
+          <button class="muted-btn" onclick="showEditMember('${m.id}')">Edit</button>
+          <button class="muted-btn danger" onclick="removeMember('${m.id}')">Remove</button>
+        </div>
+      </div>
+    `).join('') : '<div class="muted">No members yet</div>';
+  }catch(e){
+    console.warn(e);
+    try{ const pub = await api('/api/public'); const members = pub.members || []; document.getElementById('membersList').innerHTML = members.length? members.map(m=>`<div class="item"><div><div class="label">${escape(m.name)}</div><div class="muted">${escape(m.gender||'')}</div></div></div>`).join('') : '<div class="muted">No members yet</div>'; }catch(ee){ document.getElementById('membersList').innerHTML = '<div class="muted">Unable to load</div>'; }
+  }
+}
 
-document.getElementById('btnAddMember').addEventListener('click', async ()=>{ const name=document.getElementById('memberName').value.trim(); const gender=document.getElementById('memberGender').value; if(!name){ toast('enter name'); return; } try{ await api('/api/admin/members',{method:'POST', body:{name, gender}}); document.getElementById('memberName').value=''; document.getElementById('memberGender').value=''; toast('added'); await loadMembers(); await loadAttendance(); }catch(e){ console.error(e); toast(e.error||'failed'); } });
+document.getElementById('btnAddMember').addEventListener('click', async ()=>{
+  const name=document.getElementById('memberName').value.trim(); const gender=document.getElementById('memberGender').value;
+  if(!name){ toast('enter name'); return; }
+  try{ await api('/api/admin/members',{method:'POST', body:{name, gender}}); document.getElementById('memberName').value=''; document.getElementById('memberGender').value=''; toast('added'); await loadMembers(); await loadAttendance(); }catch(e){ console.error(e); toast(e.error||'failed'); }
+});
 
-window.removeMember = async function(id){ if(!confirm('Remove?')) return; try{ await api('/api/admin/members',{method:'DELETE', body:{id}}); toast('removed'); await loadMembers(); await loadAttendance(); }catch(e){ console.error(e); toast(e.error||'failed'); } };
+window.removeMember = async function(id){
+  if(!confirm('Remove?')) return;
+  try{ await api('/api/admin/members',{method:'DELETE', body:{id}}); toast('removed'); await loadMembers(); await loadAttendance(); }catch(e){ console.error(e); toast(e.error||'failed'); }
+};
 
-// ATTENDANCE
+window.showEditMember = async function(id){
+  try{
+    // fetch member (we can fetch list and find, or call /api/admin/members GET)
+    const list = await api('/api/admin/members');
+    const m = (list||[]).find(x=>x.id===id);
+    if(!m) return toast('Member not found');
+    const body = document.getElementById('modalBody');
+    body.innerHTML = `
+      <input id="modal_field_name" placeholder="Full name" value="${escape(m.name)}" />
+      <select id="modal_field_gender">
+        <option value="">Gender</option>
+        <option value="Male"${m.gender==='Male'?' selected':''}>Male</option>
+        <option value="Female"${m.gender==='Female'?' selected':''}>Female</option>
+      </select>
+    `;
+    showModal('Edit member', async ()=>{
+      const newName = document.getElementById('modal_field_name').value.trim();
+      const newGender = document.getElementById('modal_field_gender').value;
+      if(!newName){ toast('Name required'); return false; }
+      try{
+        await api('/api/admin/members',{method:'PUT', body:{id, name:newName, gender:newGender}});
+        toast('Saved'); await loadMembers(); await loadAttendance();
+        return true;
+      }catch(e){ console.error(e); toast(e.error||'failed'); return false; }
+    });
+  }catch(e){ console.error(e); toast('Unable to edit'); }
+};
+
+// ---------- ATTENDANCE ----------
 function nearestSunday(){ const d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-d.getDay()); return d.toISOString().slice(0,10);} 
 document.getElementById('btnToday').addEventListener('click', ()=>{ document.getElementById('attDate').value = nearestSunday(); loadAttendance(); });
 document.getElementById('btnLoadAttendance').addEventListener('click', loadAttendance);
 
-async function loadAttendance(){ try{ let members; try{ members = await api('/api/admin/members'); }catch(e){ const pub = await api('/api/public'); members = pub.members || []; }
+async function loadAttendance(){
+  try{
+    let members;
+    try{ members = await api('/api/admin/members'); }catch(e){ const pub = await api('/api/public'); members = pub.members || []; }
     const pub = await api('/api/public'); const map = pub.attendance || {}; const date = document.getElementById('attDate').value || nearestSunday(); document.getElementById('attDate').value = date; const day = map[date] || {};
     const html = members.length? members.map(m=>{ const rec = day[m.id]; const status = rec? (rec.status==='present'? 'present':'absent'):'not marked'; const edited = rec && rec.edited_at?` • edited ${rec.edited_at}`:''; return `<div class="item"><div><div class="label">${escape(m.name)}</div><div class="muted">${m.gender||''} • ${status}${edited}</div></div><div style="display:flex;gap:8px"><button onclick="setAttendance('${date}','${m.id}','present')" style="background:#10b981">Present</button><button onclick="setAttendance('${date}','${m.id}','absent')" style="background:#ef4444">Absent</button></div></div>` }).join('') : '<div class="muted">No members</div>';
     document.getElementById('attendanceList').innerHTML = html;
@@ -308,19 +412,159 @@ async function loadAttendance(){ try{ let members; try{ members = await api('/ap
 
 async function setAttendance(date,id,status){ try{ await api('/api/admin/attendance',{ method:'POST', body:{ date, id, status }}); toast('saved'); await loadAttendance(); }catch(e){ console.error(e); toast(e.error||'failed'); } }
 
-// CONTENT posting
-async function postContent(kind){ const title=document.getElementById('contentTitleInput').value.trim(); const sub=document.getElementById('contentSubInput').value.trim(); const notes=document.getElementById('contentNotesInput').value.trim(); if(!title) return toast('Title required'); try{ if(kind==='bible') await api('/api/admin/bible',{method:'POST', body:{title, passage:sub, notes}}); if(kind==='event') await api('/api/admin/events',{method:'POST', body:{title, date:sub, location:'', description:notes}}); if(kind==='summon') await api('/api/admin/summons',{method:'POST', body:{title, body:notes}}); if(kind==='resource') await api('/api/admin/resources',{method:'POST', body:{title, url:sub}}); toast('Posted'); document.getElementById('contentTitleInput').value=''; document.getElementById('contentSubInput').value=''; document.getElementById('contentNotesInput').value=''; }catch(e){ console.error(e); toast(e.error||'failed'); } }
-
+// ---------- CONTENT posting & editable lists ----------
+async function postContent(kind){
+  const title = document.getElementById('contentTitleInput').value.trim();
+  const sub = document.getElementById('contentSubInput').value.trim();
+  const notes = document.getElementById('contentNotesInput').value.trim();
+  if(!title) return toast('Title required');
+  try{
+    if(kind==='bible') await api('/api/admin/bible',{method:'POST', body:{title, passage:sub, notes}});
+    if(kind==='event') await api('/api/admin/events',{method:'POST', body:{title, date:sub, location:'', description:notes}});
+    if(kind==='summon') await api('/api/admin/summons',{method:'POST', body:{title, body:notes}});
+    if(kind==='resource') await api('/api/admin/resources',{method:'POST', body:{title, url:sub}});
+    toast('Posted'); document.getElementById('contentTitleInput').value=''; document.getElementById('contentSubInput').value=''; document.getElementById('contentNotesInput').value=''; await loadAllContent();
+  }catch(e){ console.error(e); toast(e.error||'failed'); }
+}
 document.getElementById('btnPostBible').addEventListener('click', ()=>postContent('bible'));
 document.getElementById('btnPostEvent').addEventListener('click', ()=>postContent('event'));
 document.getElementById('btnPostSummon').addEventListener('click', ()=>postContent('summon'));
 document.getElementById('btnPostResource').addEventListener('click', ()=>postContent('resource'));
 
-// DONATIONS
-document.getElementById('btnAddDonation').addEventListener('click', async ()=>{ const name=document.getElementById('donorName').value.trim()||'Anonymous'; const amount=parseFloat(document.getElementById('donAmount').value)||0; if(!amount) return toast('amount'); try{ await api('/api/admin/donations',{method:'POST', body:{name, amount}}); document.getElementById('donorName').value=''; document.getElementById('donAmount').value=''; toast('Donation added'); await loadDonations(); }catch(e){ console.error(e); toast(e.error||'failed'); } });
-async function loadDonations(){ try{ const j = await api('/api/admin/donations'); const el=document.getElementById('donationsList'); el.innerHTML = j.length? j.map(d=>`<div class="item"><div><div class="label">${escape(d.name)}</div><div class="muted">KES ${escape(String(d.amount))}</div></div></div>`).join('') : '<div class="muted">No donations</div>'; }catch(e){ console.warn(e); document.getElementById('donationsList').innerHTML = '<div class="muted">Unable to load</div>'; } }
+// render editable lists and add Edit/Delete actions
+async function loadAllContent(){
+  await Promise.allSettled([
+    loadCollectionEditable('events', 'eventsListEditable'),
+    loadCollectionEditable('summons', 'summonsListEditable'),
+    loadCollectionEditable('bible', 'bibleListEditable'),
+    loadCollectionEditable('resources', 'resourcesListEditable'),
+    loadDonations(),
+    loadContributions()
+  ]);
+}
 
-// CONTRIBUTIONS (finance)
+async function loadCollectionEditable(collection, targetId){
+  try{
+    const j = await api(`/api/admin/${collection}`, {method:'GET'});
+    const el = document.getElementById(targetId);
+    if(!Array.isArray(j) || j.length===0){ el.innerHTML = '<div class="muted">No items</div>'; return; }
+    el.innerHTML = j.map(it=>{
+      const title = escape(it.title || it.name || '(no title)');
+      // show small meta
+      const meta = (collection==='events') ? escape((it.date||'') + ' ' + (it.location||'')) : (collection==='bible'? escape(it.passage||''): (collection==='resources'? (it.url? `<div class="muted small">${escape(it.url)}</div>` : '') : ''));
+      return `<div class="item"><div style="flex:1"><div class="label">${title}</div><div class="muted small" style="margin-top:6px">${escape(it.description||it.body||it.notes||'')}</div>${meta||''}</div><div style="display:flex;flex-direction:column;gap:6px"><button class="muted-btn" onclick="editContentItem('${collection}','${it.id}')">Edit</button><button class="muted-btn danger" onclick="deleteContentItem('${collection}','${it.id}')">Delete</button></div></div>`;
+    }).join('');
+  }catch(e){ console.error(e); document.getElementById(targetId).innerHTML = '<div class="muted">Unable to load</div>'; }
+}
+
+window.editContentItem = async function(collection, id){
+  try{
+    const it = await api(`/api/admin/${collection}/${id}`, {method:'GET'});
+    if(!it || it.ok===false) return toast('Not found');
+    const body = document.getElementById('modalBody');
+    // build fields depending on collection
+    if(collection==='events'){
+      body.innerHTML = `
+        <input id="modal_title" placeholder="Title" value="${escape(it.title)}" />
+        <input id="modal_date" type="date" value="${(it.date||'').slice(0,10)}" />
+        <input id="modal_location" placeholder="Location" value="${escape(it.location||'')}" />
+        <textarea id="modal_description" placeholder="Description">${escape(it.description||'')}</textarea>
+      `;
+    } else if(collection==='summons'){
+      body.innerHTML = `
+        <input id="modal_title" placeholder="Title" value="${escape(it.title)}" />
+        <textarea id="modal_body" placeholder="Body">${escape(it.body||'')}</textarea>
+      `;
+    } else if(collection==='bible'){
+      body.innerHTML = `
+        <input id="modal_title" placeholder="Title" value="${escape(it.title)}" />
+        <input id="modal_passage" placeholder="Passage" value="${escape(it.passage||'')}" />
+        <textarea id="modal_notes" placeholder="Notes">${escape(it.notes||'')}</textarea>
+      `;
+    } else if(collection==='resources'){
+      body.innerHTML = `
+        <input id="modal_title" placeholder="Title" value="${escape(it.title)}" />
+        <input id="modal_url" placeholder="URL" value="${escape(it.url||'')}" />
+        <textarea id="modal_notes" placeholder="Notes">${escape(it.notes||'')}</textarea>
+      `;
+    } else {
+      body.innerHTML = `<div class="muted">No editor for this type</div>`;
+    }
+
+    showModal('Edit ' + collection.slice(0, -1), async ()=>{
+      try{
+        let payload = {};
+        if(collection==='events'){
+          payload = { title: document.getElementById('modal_title').value.trim(), date: document.getElementById('modal_date').value, location: document.getElementById('modal_location').value.trim(), description: document.getElementById('modal_description').value.trim() };
+        } else if(collection==='summons'){
+          payload = { title: document.getElementById('modal_title').value.trim(), body: document.getElementById('modal_body').value.trim() };
+        } else if(collection==='bible'){
+          payload = { title: document.getElementById('modal_title').value.trim(), passage: document.getElementById('modal_passage').value.trim(), notes: document.getElementById('modal_notes').value.trim() };
+        } else if(collection==='resources'){
+          payload = { title: document.getElementById('modal_title').value.trim(), url: document.getElementById('modal_url').value.trim(), notes: document.getElementById('modal_notes').value.trim() };
+        }
+        await api(`/api/admin/${collection}/${id}`, { method:'PUT', body: payload });
+        toast('Saved'); await loadAllContent();
+        return true;
+      }catch(e){ console.error(e); toast(e.error||'failed'); return false; }
+    });
+  }catch(e){ console.error(e); toast('Unable to load item'); }
+};
+
+window.deleteContentItem = async function(collection, id){
+  if(!confirm('Delete this item?')) return;
+  try{
+    await api(`/api/admin/${collection}/${id}`, { method:'DELETE' });
+    toast('Deleted'); await loadAllContent();
+  }catch(e){ console.error(e); toast(e.error||'failed'); }
+};
+
+// ---------- DONATIONS (add/edit/delete) ----------
+document.getElementById('btnAddDonation').addEventListener('click', async ()=>{
+  const name=document.getElementById('donorName').value.trim()||'Anonymous';
+  const amount=parseFloat(document.getElementById('donAmount').value)||0;
+  if(!amount) return toast('amount');
+  try{ await api('/api/admin/donations',{method:'POST', body:{name, amount}}); document.getElementById('donorName').value=''; document.getElementById('donAmount').value=''; toast('Donation added'); await loadDonations(); }catch(e){ console.error(e); toast(e.error||'failed'); }
+});
+
+async function loadDonations(){
+  try{
+    const j = await api('/api/admin/donations');
+    const el=document.getElementById('donationsList');
+    el.innerHTML = j.length? j.map(d=>`<div class="item"><div><div class="label">${escape(d.name)}</div><div class="muted">KES ${escape(String(d.amount))} • ${escape(d.created_at||'')}</div></div><div style="display:flex;flex-direction:column;gap:6px"><button class="muted-btn" onclick="editDonation('${d.id}')">Edit</button><button class="muted-btn danger" onclick="removeDonation('${d.id}')">Delete</button></div></div>`).join('') : '<div class="muted">No donations</div>';
+  }catch(e){ console.warn(e); document.getElementById('donationsList').innerHTML = '<div class="muted">Unable to load</div>'; }
+}
+
+window.editDonation = async function(id){
+  try{
+    const list = await api('/api/admin/donations'); const item = (list||[]).find(x=>x.id===id);
+    if(!item) return toast('Not found');
+    const body = document.getElementById('modalBody');
+    body.innerHTML = `
+      <input id="modal_donor" placeholder="Donor" value="${escape(item.name)}" />
+      <input id="modal_amount" placeholder="Amount" value="${escape(String(item.amount||''))}" />
+      <textarea id="modal_note" placeholder="Note">${escape(item.note||'')}</textarea>
+    `;
+    showModal('Edit donation', async ()=>{
+      const name = document.getElementById('modal_donor').value.trim()||'Anonymous';
+      const amount = parseFloat(document.getElementById('modal_amount').value) || 0;
+      const note = document.getElementById('modal_note').value || '';
+      if(!amount) { toast('Enter amount'); return false; }
+      try{
+        await api('/api/admin/donations/'+id, { method:'PUT', body:{ name, amount, note } });
+        toast('Saved'); await loadDonations();
+        return true;
+      }catch(e){ console.error(e); toast(e.error||'failed'); return false; }
+    });
+  }catch(e){ console.error(e); toast('Unable to edit'); }
+};
+
+window.removeDonation = async function(id){
+  if(!confirm('Delete donation?')) return;
+  try{ await api('/api/admin/donations/'+id, { method:'DELETE' }); toast('Deleted'); await loadDonations(); }catch(e){ console.error(e); toast(e.error||'failed'); }
+};
+
+// ---------- CONTRIBUTIONS (existing handlers kept) ----------
 document.getElementById('btnAddContrib').addEventListener('click', async ()=>{
   const name = (document.getElementById('contribName').value.trim() || 'Anonymous');
   const amount = parseFloat(document.getElementById('contribAmount').value) || 0;
@@ -334,6 +578,7 @@ document.getElementById('btnAddContrib').addEventListener('click', async ()=>{
     toast('Contribution added');
     await loadContributions();
     await loadDonations();
+    await loadAllContent();
   }catch(e){ console.error(e); toast(e.error||'failed'); }
 });
 
@@ -343,21 +588,27 @@ async function loadContributions(){
   try{
     const j = await api('/api/admin/contributions');
     const el = document.getElementById('contributionsList');
-    if(!Array.isArray(j) || j.length===0){ el.innerHTML = '<div class="muted">No contributions</div>'; return; }
-    const html = j.map(c=>{
-      return `<div class="item"><div style="flex:1"><div class="label">${escape(c.name)} • ${escape(c.category)}</div><div class="muted">${escape(c.date||'')} • KES ${Number(c.amount).toFixed(2)}</div><div style="margin-top:6px">${escape(c.note||'')}</div></div><div style="display:flex;flex-direction:column;gap:6px"><button class="muted-btn" onclick="editContribution('${c.id}')">Edit</button><button class="muted-btn danger" onclick="removeContribution('${c.id}')">Delete</button></div></div>`;
-    }).join('');
+    if(!Array.isArray(j) || j.length===0){ el.innerHTML = '<div class="muted">No contributions</div>'; return j; }
+    const html = j.map(c=>`
+      <div class="item">
+        <div style="flex:1"><div class="label">${escape(c.name)} • ${escape(c.category)}</div><div class="muted">${escape(c.date||'')} • KES ${Number(c.amount).toFixed(2)}</div><div style="margin-top:6px">${escape(c.note||'')}</div></div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <button class="muted-btn" onclick="editContribution('${c.id}')">Edit</button>
+          <button class="muted-btn danger" onclick="removeContribution('${c.id}')">Delete</button>
+        </div>
+      </div>`).join('');
     el.innerHTML = html;
+    return j;
   }catch(e){ console.warn(e); document.getElementById('contributionsList').innerHTML = '<div class="muted">Unable to load</div>'; }
 }
 
+// reuse existing editContribution and removeContribution functions (keeps prompts modal simple)
 window.removeContribution = async function(id){
   if(!confirm('Delete contribution?')) return;
   try{ await api('/api/admin/contributions/'+id, {method:'DELETE'}); toast('Deleted'); await loadContributions(); }catch(e){ console.error(e); toast(e.error||'failed'); }
 };
 
 window.editContribution = async function(id){
-  // simple inline edit prompt - you can replace with nicer modal
   try{
     const list = await api('/api/admin/contributions'); const item = (list||[]).find(x=>x.id===id);
     if(!item) return toast('Not found');
@@ -371,18 +622,18 @@ window.editContribution = async function(id){
   }catch(e){ console.error(e); toast(e.error||'failed'); }
 };
 
-// PRAYERS inbox (same as earlier)
+// ---------- PRAYERS ----------
 async function loadPrayers(){ try{ const j = await api('/api/prayers'); const el=document.getElementById('prayersList'); el.innerHTML = j.length? j.map(p=>`<div class="item"><div style="flex:1"><div class="label">${escape(p.name)}</div><div class="muted">${escape(p.created_at||'')}</div><div style="margin-top:8px">${escape(p.body)}</div>${p.reply?`<div style="margin-top:8px;color:#065f46"><strong>Reply:</strong> ${escape(p.reply)}</div>`:`<div style="margin-top:8px"><textarea id="reply_${p.id}" rows="2" placeholder="Write reply..."></textarea><div style="display:flex;gap:8px;margin-top:6px"><button onclick="replyPrayer('${p.id}')">Reply</button><button onclick="markAnswered('${p.id}')">Mark answered</button></div></div>`}</div></div>`).join('') : '<div class="muted">No prayers</div>'; }catch(e){ console.warn(e); document.getElementById('prayersList').innerHTML = '<div class="muted">Unable to load prayers</div>'; } }
 
 async function replyPrayer(id){ const txt = document.getElementById('reply_'+id).value.trim(); if(!txt) return toast('type reply'); try{ await api('/api/admin/prayers/'+id+'/reply',{method:'POST', body:{reply:txt, status:'answered'}}); toast('Replied'); await loadPrayers(); }catch(e){ console.error(e); toast(e.error||'failed'); } }
 async function markAnswered(id){ if(!confirm('Mark answered?')) return; try{ await api('/api/admin/prayers/'+id+'/reply',{method:'POST', body:{reply:'Marked answered', status:'answered'}}); toast('Marked'); await loadPrayers(); }catch(e){ console.error(e); toast(e.error||'failed'); } }
 
-// ADMINS list/add
+// ---------- ADMINS list/add ----------
 document.getElementById('btnAddAdmin').addEventListener('click', async ()=>{ const name=document.getElementById('newAdminName').value.trim(); const pass=document.getElementById('newAdminPass').value; if(!name||!pass) return toast('fill both'); try{ await api('/api/admin/add_admin',{method:'POST', body:{name, password: pass}}); document.getElementById('newAdminName').value=''; document.getElementById('newAdminPass').value=''; toast('admin added'); await loadAdmins(); }catch(e){ console.error(e); toast(e.error||'failed'); } });
 document.getElementById('btnListAdmins').addEventListener('click', loadAdmins);
 async function loadAdmins(){ try{ const j = await api('/api/admin/list_admins'); const el=document.getElementById('adminsList'); el.innerHTML = j.length? j.map(a=>`<div class="item"><div><div class="label">${escape(a.name)}</div><div class="muted">${escape(a.created_at||'')}</div></div></div>`).join('') : '<div class="muted">No admins</div>'; }catch(e){ console.warn(e); document.getElementById('adminsList').innerHTML = '<div class="muted">Unable to load admins</div>'; } }
 
-// STAFF management (admin-only)
+// ---------- STAFF ----------
 document.getElementById('btnAddStaff').addEventListener('click', async ()=>{
   const name = document.getElementById('staffName').value.trim();
   const password = document.getElementById('staffPass').value;
@@ -425,21 +676,49 @@ window.removeStaff = async function(id){
     toast('Removed');
     await loadStaff();
   }catch(e){ console.error(e); toast(e.error||'failed'); }
+};
+
+// ---------- modal helpers ----------
+function showModal(title, onSave){
+  const backdrop = document.getElementById('modalBackdrop');
+  document.getElementById('modalTitle').textContent = title;
+  backdrop.style.display = 'flex';
+  const cleanup = ()=>{
+    backdrop.style.display = 'none';
+    document.getElementById('modalBody').innerHTML = '';
+    document.getElementById('modalSave').onclick = null;
+    document.getElementById('modalCancel').onclick = null;
+  };
+  document.getElementById('modalCancel').onclick = ()=>{ cleanup(); };
+  document.getElementById('modalSave').onclick = async ()=>{
+    try{
+      const ok = await onSave();
+      if(ok) cleanup();
+    }catch(e){ console.error(e); cleanup(); }
+  };
 }
 
-// UTIL & startup
-function escape(s){ return String(s||'').replace(/[&<>\"']/g, c => ({'&':'&amp;','<' :'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-async function refreshAll(){ await Promise.allSettled([loadMembers(), loadAttendance(), loadPrayers(), loadDonations(), loadContributions(), loadAdmins(), loadStaff()]); }
+// ---------- startup & refresh ----------
+async function refreshAll(){ await Promise.allSettled([loadMembers(), loadAttendance(), loadAllContent(), loadPrayers(), loadDonations(), loadContributions(), loadAdmins(), loadStaff()]); }
 
-async function loadAdmins(){ await loadAdminsSafe(); }
-async function loadAdminsSafe(){ try{ const j = await api('/api/admin/list_admins'); const el=document.getElementById('adminsList'); el.innerHTML = j.length? j.map(a=>`<div class="item"><div><div class="label">${escape(a.name)}</div><div class="muted">${escape(a.created_at||'')}</div></div></div>`).join('') : '<div class="muted">No admins</div>'; }catch(e){ console.warn(e); document.getElementById('adminsList').innerHTML = '<div class="muted">Unable to load admins</div>'; } }
-
-// wrapper to safely call loadContributions when endpoint may be protected
-async function loadContributions(){ try{ return await loadContributionsSafe(); }catch(e){ console.warn(e); document.getElementById('contributionsList').innerHTML = '<div class="muted">Unable to load</div>'; } }
-async function loadContributionsSafe(){ const j = await api('/api/admin/contributions'); const el = document.getElementById('contributionsList'); if(!Array.isArray(j) || j.length===0){ el.innerHTML = '<div class="muted">No contributions</div>'; return j; } const html = j.map(c=>`<div class="item"><div style="flex:1"><div class="label">${escape(c.name)} • ${escape(c.category)}</div><div class="muted">${escape(c.date||'')} • KES ${Number(c.amount).toFixed(2)}</div><div style="margin-top:6px">${escape(c.note||'')}</div></div><div style="display:flex;flex-direction:column;gap:6px"><button class="muted-btn" onclick="editContribution('${c.id}')">Edit</button><button class="muted-btn danger" onclick="removeContribution('${c.id}')">Delete</button></div></div>`).join(''); el.innerHTML = html; return j; }
-
-// startup check & boot
-(async function init(){ try{ const r = await fetch('/api/admin/members', {credentials:'same-origin'}); if(r.status===200){ document.getElementById('authWrap').style.display='none'; document.getElementById('dashboard').classList.remove('hidden'); document.getElementById('logoutBtn').classList.remove('hidden'); refreshAll(); } else { document.getElementById('authWrap').style.display='block'; await boot(); } }catch(e){ document.getElementById('authWrap').style.display='block'; await boot(); } })();
+async function init(){ 
+  try{
+    const r = await fetch('/api/admin/members', {credentials:'same-origin'});
+    if(r.status===200){
+      document.getElementById('authWrap').style.display='none';
+      document.getElementById('dashboard').classList.remove('hidden');
+      document.getElementById('logoutBtn').classList.remove('hidden');
+      await refreshAll();
+    } else {
+      document.getElementById('authWrap').style.display='block';
+      await boot();
+    }
+  }catch(e){
+    document.getElementById('authWrap').style.display='block';
+    await boot();
+  }
+}
+init();
 
 </script>
 </body>
