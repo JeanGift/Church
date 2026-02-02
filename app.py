@@ -1,5 +1,3 @@
-
-
 #!/usr/bin/env python3
 """
 app.py - Tomorrow PWA backend + Admin UI (GitHub-backed DB optional)
@@ -16,6 +14,7 @@ Environment variables (optional):
   KEEPALIVE_INTERVAL - seconds between pings (default 1200 = 20min)
   UPTIME_MONITORS - comma-separated extra URLs to ping (optional)
   RUN_KEEPALIVE_IN_WORKERS - "1" to allow thread to start in each worker (default "1")
+  PULSE_SECRET - optional secret required in X-PULSE-TOKEN or ?token= for /pulse_receiver
 """
 import os
 import json
@@ -105,7 +104,8 @@ DEFAULT_DATA = {
     "resources": [],
     "donations": [],
     "contributions": [], # tithes / offerings / pledges (new collection)
-    "prayers": []
+    "prayers": [],
+    "pulses": []         # external pulses received via /pulse_receiver
 }
 
 START_TIME = datetime.datetime.utcnow()
@@ -113,6 +113,9 @@ app.config.setdefault("KEEPALIVE_RUNNING", False)
 app.config.setdefault("KEEPALIVE_STARTED", False)
 app.config.setdefault("LAST_PINGS", {})
 app.config.setdefault("GITHUB_SHA", None)
+
+# Optional PULSE_SECRET to require X-PULSE-TOKEN or ?token= on /pulse_receiver
+PULSE_SECRET = os.getenv("PULSE_SECRET")
 
 def now():
     return datetime.datetime.utcnow().isoformat() + "Z"
@@ -690,6 +693,54 @@ def staff_me():
             return jsonify({"ok": True, "staff": {"id": s["id"], "name": s["name"], "role": s.get("role",""), "perms": s.get("perms",{}), "contact": s.get("contact","")}})
     return jsonify({"ok": False, "staff": None})
 
+# ------------------ PULSE RECEIVER: new endpoint for breathe -> whoiam integration ------------------
+
+@app.route("/pulse_receiver", methods=["POST", "GET"])
+def pulse_receiver():
+    """
+    Receive an external pulse (from breathe).
+    - If PULSE_SECRET env var is set, require header X-PULSE-TOKEN or ?token=... to match.
+    - Stores the pulse in data['pulses'] and updates app.config['LAST_PINGS'] for quick visibility.
+    - Returns JSON {status, received_at}.
+    """
+    token = request.headers.get("X-PULSE-TOKEN") or request.args.get("token")
+    if PULSE_SECRET:
+        if not token or token != PULSE_SECRET:
+            app.logger.warning("pulse_receiver: unauthorized attempt from %s", request.remote_addr)
+            return jsonify({"status": "unauthorized"}), 401
+
+    payload = request.get_json(silent=True)
+    if payload is None:
+        payload = request.form.to_dict() or {"message": "ping"}
+
+    received_at = now()
+    # persist pulse to data store (GitHub-aware)
+    try:
+        data = load_data()
+        pulse = {
+            "id": str(uuid.uuid4()),
+            "source_ip": request.remote_addr or "unknown",
+            "headers": {k: v for k, v in request.headers.items()},
+            "payload": payload,
+            "received_at": received_at
+        }
+        # prepend so newest first
+        data.setdefault("pulses", [])
+        data["pulses"].insert(0, pulse)
+        # trim to last 200 entries to avoid runaway growth
+        if len(data["pulses"]) > 200:
+            data["pulses"] = data["pulses"][:200]
+        save_data(data)
+        # update quick in-memory last pings map
+        src = request.remote_addr or "unknown"
+        app.config["LAST_PINGS"][src] = {"ok": True, "at": received_at}
+        app.logger.info("pulse_receiver: received pulse from %s at %s", src, received_at)
+    except Exception as e:
+        app.logger.exception("pulse_receiver: failed to save pulse: %s", e)
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+    return jsonify({"status": "ok", "received_at": received_at}), 200
+
 # ------------------ health & keep-alive ------------------
 
 @app.route("/api/health")
@@ -700,7 +751,8 @@ def api_health():
         "uptime_seconds": int(uptime),
         "github_sha": app.config.get("GITHUB_SHA"),
         "keepalive_running": app.config.get("KEEPALIVE_RUNNING", False),
-        "last_pings": app.config.get("LAST_PINGS", {})
+        "last_pings": app.config.get("LAST_PINGS", {}),
+        "pulses_count": len(load_data().get("pulses", []))
     })
 
 def keepalive_worker(self_url, monitors, interval_seconds):
