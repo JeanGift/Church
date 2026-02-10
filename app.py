@@ -8,7 +8,7 @@ Environment variables (optional):
   GITHUB_BRANCH   - branch to use (default: "main")
   GITHUB_DB_PATH  - path in repo for DB file (default: "data/db.json")
   FLASK_SECRET    - Flask session secret (recommended to set)
-  PORT            - port for gunicorn or for local run (default: 4001)
+  PORT            - port for gunicorn or for local run (default 4001)
   APP_URL         - public URL used by keep-alive (e.g. https://example.com)
   KEEPALIVE_ENABLED - "1" to enable keep-alive (default "1")
   KEEPALIVE_INTERVAL - seconds between pings (default 1200 = 20min)
@@ -40,7 +40,7 @@ DB_PATH = os.getenv("GITHUB_DB_PATH", "data/db.json")
 ROOT = Path(__file__).parent.resolve()
 LOCAL_DATA_FILE = ROOT / "data.json"
 
-# stored in memory while process runs (sha returned by GitHub) - kept for visibility but not required
+# stored in memory while process runs (sha returned by GitHub) - kept for visibility
 _GITHUB_SHA = None
 
 def load_from_github():
@@ -48,7 +48,11 @@ def load_from_github():
     if not GITHUB_TOKEN or not REPO:
         return None, None
     url = f"https://api.github.com/repos/{REPO}/contents/{DB_PATH}?ref={BRANCH}"
-    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "TomorrowAI-GitHub-DB/1"
+    }
     try:
         r = requests.get(url, headers=headers, timeout=10)
     except Exception:
@@ -72,13 +76,17 @@ def save_to_github(data, sha=None):
     if not GITHUB_TOKEN or not REPO:
         return False, None, None, "no token/repo configured"
     url = f"https://api.github.com/repos/{REPO}/contents/{DB_PATH}"
-    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "TomorrowAI-GitHub-DB/1"
+    }
     content_b64 = base64.b64encode(json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")).decode("utf-8")
     payload = {"message": "Update database (auto)", "content": content_b64, "branch": BRANCH}
     if sha:
         payload["sha"] = sha
     try:
-        r = requests.put(url, headers=headers, json=payload, timeout=15)
+        r = requests.put(url, headers=headers, json=payload, timeout=20)
     except Exception as e:
         return False, None, None, str(e)
     if r.status_code in (200, 201):
@@ -115,6 +123,7 @@ app.config.setdefault("KEEPALIVE_RUNNING", False)
 app.config.setdefault("KEEPALIVE_STARTED", False)
 app.config.setdefault("LAST_PINGS", {})
 app.config.setdefault("GITHUB_SHA", None)
+app.config.setdefault("LAST_GITHUB_STATUS", None)  # {ok: bool, code: int, text: str}
 
 # Optional PULSE_SECRET to require X-PULSE-TOKEN or ?token= on /pulse_receiver
 PULSE_SECRET = os.getenv("PULSE_SECRET")
@@ -169,56 +178,62 @@ def save_data(data):
     """
     Saves data either to GitHub (if configured) or to local file.
     Strategy:
-      - If GitHub configured, attempt up to 3 times: fetch latest SHA, PUT with that SHA.
-      - On success: update local cache and app.config["GITHUB_SHA"], return True.
-      - If all GitHub attempts fail: write local cache (fallback) and return True (so app continues),
-        but app logs/can detect that GitHub writes failed via /api/health github_sha field (None or stale).
+      - If GitHub configured, attempt up to 5 times: fetch latest SHA, PUT with that SHA.
+      - On success: update local cache and app.config["GITHUB_SHA"] & LAST_GITHUB_STATUS, return True.
+      - If all GitHub attempts fail: write local cache (fallback) and set LAST_GITHUB_STATUS accordingly.
     """
     global _GITHUB_SHA
+    last_status = {"ok": False, "code": None, "text": None}
     # If GitHub configured, attempt robust save
     if GITHUB_TOKEN and REPO:
-        attempts = 3
-        last_status = None
+        attempts = 5
         for attempt in range(attempts):
-            # fetch latest file+sha just before writing
             latest_db, latest_sha = load_from_github()
-            # Note: latest_db may be None if GitHub GET failed; latest_sha may be None if file doesn't exist yet.
+            # latest_sha may be None if file doesn't exist yet; that's OK (GitHub allows creating the file)
             success, new_sha, status_code, resp_text = save_to_github(data, sha=latest_sha)
-            last_status = (success, new_sha, status_code, resp_text)
+            last_status["ok"] = bool(success)
+            last_status["code"] = status_code
+            last_status["text"] = (resp_text[:1000] if isinstance(resp_text, str) else str(resp_text))
+            app.config["LAST_GITHUB_STATUS"] = last_status
             if success:
                 _GITHUB_SHA = new_sha
                 app.config["GITHUB_SHA"] = _GITHUB_SHA
-                # update local cache (best-effort)
                 try:
                     with open(LOCAL_DATA_FILE, "w", encoding="utf-8") as f:
                         json.dump(data, f, indent=2, ensure_ascii=False)
                 except Exception:
                     pass
+                app.logger.info("save_data: saved to GitHub (sha=%s)", _GITHUB_SHA)
                 return True
-            # if conflict or validation error, retry shortly
+            # Retry on conflicts / validation issues
             if status_code in (409, 422):
-                time.sleep(0.2)
+                time.sleep(0.25 + attempt * 0.1)
                 continue
-            # other failures: break retry loop
+            # for transient network issues status_code may be None - optionally retry
+            if status_code is None:
+                time.sleep(0.25)
+                continue
+            # other errors -> break and fallback
             break
 
-        # If we reach here, GitHub writes failed after retries.
-        # Persist to local cache so app keeps working; surface the last status in logs via return False (or True fallback)
+        # If we reach here, GitHub writes failed after retries -> fallback to local cache
         try:
             with open(LOCAL_DATA_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-            # keep app.config["GITHUB_SHA"] as whatever last known (may be None)
-            # You can inspect last_status to see why it failed in logs (status_code / resp_text)
+            app.logger.warning("save_data: GitHub writes failed, saved locally as fallback. last_status=%s", last_status)
             return True
-        except Exception:
+        except Exception as e:
+            app.logger.exception("save_data: failed to save locally after GitHub failure: %s", e)
             return False
     else:
         # Pure local mode
         try:
             with open(LOCAL_DATA_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
+            app.config["LAST_GITHUB_STATUS"] = {"ok": False, "code": None, "text": "no-github-config"}
             return True
-        except Exception:
+        except Exception as e:
+            app.logger.exception("save_data: failed to save local data: %s", e)
             return False
 
 # ------------------ decorators ------------------
@@ -778,6 +793,7 @@ def api_health():
         "ok": True,
         "uptime_seconds": int(uptime),
         "github_sha": app.config.get("GITHUB_SHA"),
+        "last_github_status": app.config.get("LAST_GITHUB_STATUS"),
         "keepalive_running": app.config.get("KEEPALIVE_RUNNING", False),
         "last_pings": app.config.get("LAST_PINGS", {}),
         "pulses_count": len(load_data().get("pulses", []))
