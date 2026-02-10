@@ -69,6 +69,26 @@ def load_from_github():
                 return None, None
     return None, None
 
+def load_from_github_raw():
+    """
+    Raw GET to GitHub contents API.
+    Returns (status_code, response_object_or_text).
+    If a network/exception occurs returns (None, str(exception)).
+    """
+    if not GITHUB_TOKEN or not REPO:
+        return None, "no-github-config"
+    url = f"https://api.github.com/repos/{REPO}/contents/{DB_PATH}?ref={BRANCH}"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "TomorrowAI-GitHub-DB/1"
+    }
+    try:
+        r = requests.get(url, headers=headers, timeout=12)
+        return r.status_code, r
+    except Exception as e:
+        return None, str(e)
+
 def save_to_github(data, sha=None):
     """
     Saves data to the repo path. Returns (success_bool, new_sha_or_None, status_code, response_text).
@@ -144,14 +164,31 @@ def load_data():
             for k, v in DEFAULT_DATA.items():
                 if k not in db:
                     db[k] = v
-            # local cache (best-effort)
+            # local cache (best-effort, not authoritative)
             try:
                 with open(LOCAL_DATA_FILE, "w", encoding="utf-8") as f:
                     json.dump(db, f, indent=2, ensure_ascii=False)
             except Exception:
                 pass
             app.config["GITHUB_SHA"] = _GITHUB_SHA
+            app.config["LAST_GITHUB_STATUS"] = {"ok": True, "code": 200, "text": "loaded from github"}
             return db
+        # If GitHub is configured but we couldn't load, try local cache for read availability
+        try:
+            if LOCAL_DATA_FILE.exists():
+                with open(LOCAL_DATA_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                for k, v in DEFAULT_DATA.items():
+                    if k not in data:
+                        data[k] = v
+                app.config["LAST_GITHUB_STATUS"] = {"ok": False, "code": None, "text": "github load_failed, using local cache"}
+                return data
+        except Exception:
+            pass
+        # If no cache, return empty structure so UI still works
+        app.config["LAST_GITHUB_STATUS"] = {"ok": False, "code": None, "text": "github load_failed, no local cache"}
+        d = DEFAULT_DATA.copy()
+        return d
     # Fallback to local file
     if not LOCAL_DATA_FILE.exists():
         try:
@@ -172,58 +209,62 @@ def load_data():
     for k, v in DEFAULT_DATA.items():
         if k not in data:
             data[k] = v
+    app.config["LAST_GITHUB_STATUS"] = {"ok": False, "code": None, "text": "no-github-config"}
     return data
 
 def save_data(data):
     """
     Saves data either to GitHub (if configured) or to local file.
     Strategy:
-      - If GitHub configured, attempt up to 5 times: fetch latest SHA, PUT with that SHA.
-      - On success: update local cache and app.config["GITHUB_SHA"] & LAST_GITHUB_STATUS, return True.
-      - If all GitHub attempts fail: write local cache (fallback) and set LAST_GITHUB_STATUS accordingly.
+      - If GitHub configured: MUST write to GitHub; if GitHub write fails, DO NOT fallback to ephemeral local storage.
+        Returns True on success, False on failure.
+      - If GitHub not configured: write locally to data.json (so you can create the file and then upload to GitHub).
     """
     global _GITHUB_SHA
-    last_status = {"ok": False, "code": None, "text": None}
-    # If GitHub configured, attempt robust save
+    # If GitHub configured, attempt robust save and DO NOT fallback to ephemeral storage
     if GITHUB_TOKEN and REPO:
-        attempts = 5
-        for attempt in range(attempts):
-            latest_db, latest_sha = load_from_github()
-            # latest_sha may be None if file doesn't exist yet; that's OK (GitHub allows creating the file)
-            success, new_sha, status_code, resp_text = save_to_github(data, sha=latest_sha)
-            last_status["ok"] = bool(success)
-            last_status["code"] = status_code
-            last_status["text"] = (resp_text[:1000] if isinstance(resp_text, str) else str(resp_text))
-            app.config["LAST_GITHUB_STATUS"] = last_status
-            if success:
-                _GITHUB_SHA = new_sha
-                app.config["GITHUB_SHA"] = _GITHUB_SHA
-                try:
-                    with open(LOCAL_DATA_FILE, "w", encoding="utf-8") as f:
-                        json.dump(data, f, indent=2, ensure_ascii=False)
-                except Exception:
-                    pass
-                app.logger.info("save_data: saved to GitHub (sha=%s)", _GITHUB_SHA)
-                return True
-            # Retry on conflicts / validation issues
-            if status_code in (409, 422):
-                time.sleep(0.25 + attempt * 0.1)
-                continue
-            # for transient network issues status_code may be None - optionally retry
-            if status_code is None:
-                time.sleep(0.25)
-                continue
-            # other errors -> break and fallback
-            break
+        # 1) Determine existence/sha of file on GitHub
+        status, resp = load_from_github_raw()
+        if status is None:
+            # network/auth error - fail hard
+            app.config["LAST_GITHUB_STATUS"] = {"ok": False, "code": None, "text": str(resp)}
+            app.logger.error("save_data: unable to reach GitHub: %s", resp)
+            return False
+        # If file exists
+        if status == 200:
+            try:
+                payload = resp.json()
+                latest_sha = payload.get("sha")
+            except Exception:
+                app.config["LAST_GITHUB_STATUS"] = {"ok": False, "code": status, "text": "invalid-json-from-github"}
+                app.logger.error("save_data: invalid JSON from GitHub GET")
+                return False
+        elif status == 404:
+            # Not found -> create mode (sha=None)
+            latest_sha = None
+        else:
+            # Any other HTTP error -> fail (403/401/422 etc.)
+            app.config["LAST_GITHUB_STATUS"] = {"ok": False, "code": status, "text": getattr(resp, "text", str(resp))}
+            app.logger.error("save_data: GitHub GET returned status %s; aborting write. resp=%s", status, getattr(resp, "text", str(resp)))
+            return False
 
-        # If we reach here, GitHub writes failed after retries -> fallback to local cache
-        try:
-            with open(LOCAL_DATA_FILE, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-            app.logger.warning("save_data: GitHub writes failed, saved locally as fallback. last_status=%s", last_status)
+        # 2) Attempt save (create or update)
+        success, new_sha, status_code, resp_text = save_to_github(data, sha=latest_sha)
+        app.config["LAST_GITHUB_STATUS"] = {"ok": bool(success), "code": status_code, "text": (resp_text[:1000] if isinstance(resp_text, str) else str(resp_text))}
+        if success:
+            _GITHUB_SHA = new_sha
+            app.config["GITHUB_SHA"] = _GITHUB_SHA
+            # Optional: write a local cache for debugging only (not authoritative)
+            try:
+                with open(LOCAL_DATA_FILE, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+            except Exception:
+                pass
+            app.logger.info("save_data: saved to GitHub (sha=%s)", _GITHUB_SHA)
             return True
-        except Exception as e:
-            app.logger.exception("save_data: failed to save locally after GitHub failure: %s", e)
+        else:
+            # GitHub write failed. DO NOT fallback to ephemeral local storage.
+            app.logger.error("save_data: GitHub write failed (code=%s) resp=%s", status_code, resp_text)
             return False
     else:
         # Pure local mode
@@ -357,7 +398,10 @@ def api_prayers():
             "updated_at": now()
         }
         data["prayers"].insert(0, prayer)
-        save_data(data)
+        ok = save_data(data)
+        if not ok:
+            # When GitHub is configured and save fails this returns an error so user knows
+            return jsonify({"ok": False, "error": "Failed to save (GitHub write failed). Check token/permissions/branch/path."}), 500
         return jsonify({"ok": True, "prayer": prayer})
     return jsonify(data["prayers"])
 
@@ -379,7 +423,9 @@ def admin_register():
         return jsonify({"ok": False, "error": "Name & password required"}), 400
     admin = {"id": str(uuid.uuid4()), "name": name, "pass_hash": generate_password_hash(password), "created_at": now()}
     data["admins"] = [admin]
-    save_data(data)
+    ok = save_data(data)
+    if not ok:
+        return jsonify({"ok": False, "error": "Failed to save (GitHub write failed)."}), 500
     session.clear()
     session["admin_id"] = admin["id"]
     session["admin_name"] = admin["name"]
@@ -416,7 +462,9 @@ def admin_add_admin():
         return jsonify({"ok": False, "error": "Name & password required"}), 400
     new_admin = {"id": str(uuid.uuid4()), "name": name, "pass_hash": generate_password_hash(password), "created_at": now()}
     data.setdefault("admins", []).append(new_admin)
-    save_data(data)
+    ok = save_data(data)
+    if not ok:
+        return jsonify({"ok": False, "error": "Failed to save (GitHub write failed)."}), 500
     return jsonify({"ok": True, "admin": {"id": new_admin["id"], "name": new_admin["name"]}})
 
 @app.route("/api/admin/list_admins")
@@ -440,7 +488,9 @@ def admin_members():
             return jsonify({"ok": False, "error": "Name required"}), 400
         m = {"id": str(uuid.uuid4()), "name": name, "gender": j.get("gender",""), "created_at": now()}
         data["members"].append(m)
-        save_data(data)
+        ok = save_data(data)
+        if not ok:
+            return jsonify({"ok": False, "error": "Failed to save (GitHub write failed)."}), 500
         return jsonify({"ok": True, "member": m})
     if request.method == "PUT":
         mid = j.get("id")
@@ -451,7 +501,9 @@ def admin_members():
                 m["name"] = j.get("name", m.get("name",""))
                 m["gender"] = j.get("gender", m.get("gender",""))
                 m["updated_at"] = now()
-                save_data(data)
+                ok = save_data(data)
+                if not ok:
+                    return jsonify({"ok": False, "error": "Failed to save (GitHub write failed)."}), 500
                 return jsonify({"ok": True, "member": m})
         return jsonify({"ok": False, "error": "Member not found"}), 404
     # DELETE
@@ -459,7 +511,9 @@ def admin_members():
     data["members"] = [m for m in data["members"] if m["id"] != mid]
     for day in data["attendance"].values():
         day.pop(mid, None)
-    save_data(data)
+    ok = save_data(data)
+    if not ok:
+        return jsonify({"ok": False, "error": "Failed to save (GitHub write failed)."}), 500
     return jsonify({"ok": True})
 
 # ------------------ admin: attendance ------------------
@@ -475,7 +529,9 @@ def admin_attendance():
         return jsonify({"ok": False, "error": "Invalid data"}), 400
     data = load_data()
     data["attendance"].setdefault(date, {})[mid] = {"status": status, "edited_at": now()}
-    save_data(data)
+    ok = save_data(data)
+    if not ok:
+        return jsonify({"ok": False, "error": "Failed to save (GitHub write failed)."}), 500
     return jsonify({"ok": True})
 
 # ------------------ admin: content posting & editing (events, summons, bible, resources) ------------------
@@ -487,7 +543,9 @@ def find_and_update(collection, item_id, updates):
         if item.get("id") == item_id:
             item.update(updates)
             item["updated_at"] = now()
-            save_data(data)
+            ok = save_data(data)
+            if not ok:
+                return None
             return item
     return None
 
@@ -504,7 +562,9 @@ def admin_collection_post(collection):
     j = request.get_json() or {}
     item = {"id": str(uuid.uuid4()), **j, "created_at": now()}
     data[collection].insert(0, item)
-    save_data(data)
+    ok = save_data(data)
+    if not ok:
+        return jsonify({"ok": False, "error": "Failed to save (GitHub write failed)."}), 500
     return jsonify({"ok": True, collection[:-1]: item})
 
 # allow GET (fetch single item), PUT (edit), DELETE (admin only)
@@ -532,7 +592,7 @@ def admin_collection_modify(collection, item_id):
             updates = {k: v for k, v in j.items() if k != "id"}
             updated = find_and_update(collection, item_id, updates)
             if not updated:
-                return jsonify({"ok": False, "error": "Not found"}), 404
+                return jsonify({"ok": False, "error": "Not found or failed to save"}), 404
             return jsonify({"ok": True, collection[:-1]: updated})
         return _put()
 
@@ -542,7 +602,9 @@ def admin_collection_modify(collection, item_id):
         def _del():
             data = load_data()
             data[collection] = [it for it in data.get(collection, []) if it.get("id") != item_id]
-            save_data(data)
+            ok = save_data(data)
+            if not ok:
+                return jsonify({"ok": False, "error": "Failed to save (GitHub write failed)."}), 500
             return jsonify({"ok": True})
         return _del()
 
@@ -564,7 +626,9 @@ def admin_donations():
         return jsonify({"ok": False, "error": "Invalid amount"}), 400
     rec = {"id": str(uuid.uuid4()), "name": name, "amount": amount, "created_at": now(), "note": j.get("note","")}
     data["donations"].insert(0, rec)
-    save_data(data)
+    ok = save_data(data)
+    if not ok:
+        return jsonify({"ok": False, "error": "Failed to save (GitHub write failed)."}), 500
     return jsonify({"ok": True, "donation": rec})
 
 @app.route("/api/admin/donations/<did>", methods=["PUT", "DELETE"])
@@ -584,7 +648,9 @@ def admin_donation_modify(did):
                         pass
                     d["note"] = j.get("note", d.get("note",""))
                     d["updated_at"] = now()
-                    save_data(data)
+                    ok = save_data(data)
+                    if not ok:
+                        return jsonify({"ok": False, "error": "Failed to save (GitHub write failed)."}), 500
                     return jsonify({"ok": True, "donation": d})
             return jsonify({"ok": False, "error": "Not found"}), 404
         return _put()
@@ -593,7 +659,9 @@ def admin_donation_modify(did):
         def _del():
             data = load_data()
             data["donations"] = [d for d in data["donations"] if d["id"] != did]
-            save_data(data)
+            ok = save_data(data)
+            if not ok:
+                return jsonify({"ok": False, "error": "Failed to save (GitHub write failed)."}), 500
             return jsonify({"ok": True})
         return _del()
 
@@ -624,7 +692,9 @@ def admin_contributions():
         "created_at": now()
     }
     data["contributions"].insert(0, rec)
-    save_data(data)
+    ok = save_data(data)
+    if not ok:
+        return jsonify({"ok": False, "error": "Failed to save (GitHub write failed)."}), 500
     return jsonify({"ok": True, "contribution": rec})
 
 @app.route("/api/admin/contributions/<cid>", methods=["PUT", "DELETE"])
@@ -647,7 +717,9 @@ def admin_contribution_modify(cid):
                     c["date"] = j.get("date", c.get("date"))
                     c["note"] = j.get("note", c.get("note",""))
                     c["updated_at"] = now()
-                    save_data(data)
+                    ok = save_data(data)
+                    if not ok:
+                        return jsonify({"ok": False, "error": "Failed to save (GitHub write failed)."}), 500
                     return jsonify({"ok": True, "contribution": c})
             return jsonify({"ok": False, "error": "Not found"}), 404
         return _put()
@@ -657,7 +729,9 @@ def admin_contribution_modify(cid):
         def _del():
             data = load_data()
             data["contributions"] = [c for c in data["contributions"] if c["id"] != cid]
-            save_data(data)
+            ok = save_data(data)
+            if not ok:
+                return jsonify({"ok": False, "error": "Failed to save (GitHub write failed)."}), 500
             return jsonify({"ok": True})
         return _del()
 
@@ -674,7 +748,9 @@ def reply_prayer(pid):
             p["reply"] = reply
             p["status"] = "answered"
             p["updated_at"] = now()
-            save_data(data)
+            ok = save_data(data)
+            if not ok:
+                return jsonify({"ok": False, "error": "Failed to save (GitHub write failed)."}), 500
             return jsonify({"ok": True})
     return jsonify({"ok": False, "error": "Not found"}), 404
 
@@ -697,12 +773,16 @@ def admin_staff():
             return jsonify({"ok": False, "error": "Name & password required"}), 400
         staff = {"id": str(uuid.uuid4()), "name": name, "role": role, "perms": perms, "contact": contact, "pass_hash": generate_password_hash(password), "created_at": now()}
         data.setdefault("staff", []).append(staff)
-        save_data(data)
+        ok = save_data(data)
+        if not ok:
+            return jsonify({"ok": False, "error": "Failed to save (GitHub write failed)."}), 500
         return jsonify({"ok": True, "staff": {"id": staff["id"], "name": staff["name"], "role": staff["role"], "perms": staff["perms"], "contact": staff.get("contact","")}})
     if request.method == "DELETE":
         sid = j.get("id")
         data["staff"] = [s for s in data.get("staff",[]) if s["id"] != sid]
-        save_data(data)
+        ok = save_data(data)
+        if not ok:
+            return jsonify({"ok": False, "error": "Failed to save (GitHub write failed)."}), 500
         return jsonify({"ok": True})
 
 # ------------------ staff auth ------------------
@@ -773,7 +853,9 @@ def pulse_receiver():
         # trim to last 200 entries to avoid runaway growth
         if len(data["pulses"]) > 200:
             data["pulses"] = data["pulses"][:200]
-        save_data(data)
+        ok = save_data(data)
+        if not ok:
+            return jsonify({"status": "error", "error": "Failed to save (GitHub write failed)."}), 500
         # update quick in-memory last pings map
         src = request.remote_addr or "unknown"
         app.config["LAST_PINGS"][src] = {"ok": True, "at": received_at}
@@ -862,7 +944,12 @@ def _ensure_keepalive_started_on_first_request():
 if __name__ == "__main__":
     # ensure local DB exists or initialize from DEFAULT_DATA
     if not LOCAL_DATA_FILE.exists():
-        save_data(DEFAULT_DATA.copy())
+        # If GitHub is configured we won't fallback for writes, but creating a local cache is fine for dev.
+        try:
+            with open(LOCAL_DATA_FILE, "w", encoding="utf-8") as f:
+                json.dump(DEFAULT_DATA.copy(), f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
     # try to prime from GitHub once at startup (best-effort)
     if GITHUB_TOKEN and REPO:
         db, sha = load_from_github()
@@ -874,6 +961,11 @@ if __name__ == "__main__":
                 pass
             _GITHUB_SHA = sha
             app.config["GITHUB_SHA"] = _GITHUB_SHA
+            app.config["LAST_GITHUB_STATUS"] = {"ok": True, "code": 200, "text": "primed from github"}
+        else:
+            # couldn't prime; leave LAST_GITHUB_STATUS set by load_data/get functions
+            status, resp = load_from_github_raw()
+            app.config["LAST_GITHUB_STATUS"] = {"ok": False, "code": status, "text": getattr(resp, "text", str(resp))}
     port = int(os.getenv("PORT", 4001))
     # start keepalive immediately when running directly
     start_keepalive_in_thread()
