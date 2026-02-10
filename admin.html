@@ -1,725 +1,880 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Church Hub — Admin</title>
-<meta name="theme-color" content="#0f5132" />
-<style>
-  :root{
-    --bg:#f3faf6; --card:#ffffff; --muted:#6b7280; --text:#071028;
-    --primary:#0f5132; --accent:#16A34A; --accent-2:#059669; --danger:#ef4444;
-    --shadow: 0 12px 36px rgba(6,8,15,0.08); --radius:14px; --gap:12px; --max:920px;
-    --tap:56px; --font:Inter,system-ui,Arial;
-  }
-  html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:var(--font);-webkit-font-smoothing:antialiased}
-  .wrap{max-width:var(--max);margin:12px auto;padding:12px}
-  header{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:12px}
-  .brand{display:flex;flex-direction:column;align-items:center}
-  h1{margin:0;font-size:18px}
-  .subtitle{font-size:13px;color:var(--muted)}
-  .controls{display:flex;gap:8px;align-items:center}
-  .lang{display:flex;gap:6px}
-  .lang button{border:0;padding:8px;border-radius:8px;background:transparent;cursor:pointer}
-  .lang .active{background:var(--primary);color:#fff}
+#!/usr/bin/env python3
+"""
+app.py - Tomorrow PWA backend + Admin UI (GitHub-backed DB optional)
 
-  /* mobile-first single column, then two column on wide screens */
-  .main{display:grid;grid-template-columns:1fr;gap:12px;margin-top:12px}
-  @media(min-width:920px){ .main{grid-template-columns:320px 1fr} }
+Environment variables (optional):
+  GITHUB_TOKEN    - your GitHub personal access token (starts with ghp_...)
+  GITHUB_REPO     - "username/repo"
+  GITHUB_BRANCH   - branch to use (default: "main")
+  GITHUB_DB_PATH  - path in repo for DB file (default: "data/db.json")
+  FLASK_SECRET    - Flask session secret (recommended to set)
+  PORT            - port for gunicorn or for local run (default 4001)
+  APP_URL         - public URL used by keep-alive (e.g. https://example.com)
+  KEEPALIVE_ENABLED - "1" to enable keep-alive (default "1")
+  KEEPALIVE_INTERVAL - seconds between pings (default 1200 = 20min)
+  UPTIME_MONITORS - comma-separated extra URLs to ping (optional)
+  RUN_KEEPALIVE_IN_WORKERS - "1" to allow thread to start in each worker (default "1")
+  PULSE_SECRET - optional secret required in X-PULSE-TOKEN or ?token= for /pulse_receiver
+"""
+import os
+import json
+import base64
+import datetime
+import uuid
+import threading
+import time
+from pathlib import Path
+from functools import wraps
 
-  .panel{background:var(--card);border-radius:var(--radius);padding:12px;box-shadow:var(--shadow);border:1px solid rgba(2,6,23,0.04)}
-  .muted{color:var(--muted);font-size:13px}
-  input,textarea,select,button{font-size:15px;padding:12px;border-radius:10px;border:1px solid rgba(2,6,23,0.06);box-sizing:border-box}
-  button{background:linear-gradient(90deg,var(--accent),var(--accent-2));color:#fff;border:0;font-weight:700;cursor:pointer}
-  .muted-btn{background:transparent;border:1px solid rgba(2,6,23,0.06);padding:10px;border-radius:10px}
-  .list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
-  .item{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;padding:10px;border-radius:10px;background:#fff;border:1px solid rgba(2,6,23,0.04)}
-  .label{font-weight:700}
-  .row{display:flex;gap:8px}
-  .col{flex:1}
-  .pill{display:inline-block;padding:6px 10px;border-radius:999px;background:#eef7ef;color:#065f46;font-weight:700}
-  .danger{background:var(--danger);color:#fff}
-  textarea{min-height:90px}
-  .small{font-size:13px}
-  .icon-btn{width:44px;height:44px;border-radius:10px;border:0;background:var(--card);box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center}
-  .hidden{display:none}
-  footer{margin-top:12px;text-align:center;color:var(--muted);font-size:13px}
-  table{width:100%;border-collapse:collapse}
-  th,td{padding:8px;border-bottom:1px solid rgba(2,6,23,0.04);text-align:left;font-size:14px}
+import requests
+from flask import Flask, request, jsonify, send_from_directory, session
+from werkzeug.security import generate_password_hash, check_password_hash
 
-  /* modal */
-  .modal-backdrop{ position:fixed; left:0; top:0; right:0; bottom:0; background:rgba(6,8,15,0.4); display:none; align-items:center; justify-content:center; z-index:9999; }
-  .modal{ background:#fff; border-radius:12px; padding:16px; width:92%; max-width:720px; box-shadow:0 24px 60px rgba(6,8,15,0.16);}
-  .modal h3{margin:0 0 8px 0}
-  .modal .row{flex-direction:column}
-  .modal .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
-</style>
-</head>
-<body>
-  <div class="wrap">
-    <header>
-      <div class="brand">
-        <h1 id="brandTitle">Church Hub — Admin</h1>
-        <div class="subtitle" id="brandSubtitle">Mobile-first • Calm green • Admin controls</div>
-      </div>
-      <div class="controls">
-        <div class="lang" aria-hidden="false">
-          <button id="langEn">EN</button>
-          <button id="langSw">SW</button>
-        </div>
-        <button id="logoutBtn" class="muted-btn hidden">Logout</button>
-      </div>
-    </header>
+# ------------------ GitHub DB helpers ------------------
 
-    <!-- AUTH / DASHBOARD container -->
-    <div id="authWrap" style="margin-top:12px">
-      <div id="registerPanel" class="panel" style="display:none">
-        <strong id="regTitle">Create first admin</strong>
-        <div class="muted small" style="margin-top:6px">Create the initial admin account — passwords are hashed.</div>
-        <div style="margin-top:10px;display:grid;gap:8px">
-          <input id="regName" placeholder="Full name" />
-          <input id="regPass" placeholder="Password" type="password" />
-          <div style="display:flex;gap:8px">
-            <button id="btnRegister">Create admin</button>
-            <button id="btnShowLogin" class="muted-btn">Login instead</button>
-          </div>
-        </div>
-      </div>
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+REPO = os.getenv("GITHUB_REPO")
+BRANCH = os.getenv("GITHUB_BRANCH", "main")
+DB_PATH = os.getenv("GITHUB_DB_PATH", "data/db.json")
 
-      <div id="loginPanel" class="panel" style="display:none">
-        <strong id="loginTitle">Admin login</strong>
-        <div class="muted small" style="margin-top:6px">Sign in to manage members, attendance and content</div>
-        <div style="margin-top:10px;display:grid;gap:8px">
-          <input id="loginName" placeholder="Admin name" />
-          <input id="loginPass" placeholder="Password" type="password" />
-          <div style="display:flex;gap:8px">
-            <button id="btnLogin">Login</button>
-            <button id="btnShowRegister" class="muted-btn">Register (first admin)</button>
-          </div>
-        </div>
-      </div>
-    </div>
+ROOT = Path(__file__).parent.resolve()
+LOCAL_DATA_FILE = ROOT / "data.json"
 
-    <div id="dashboard" class="main hidden">
-      <!-- LEFT COLUMN: members, attendance, admins -->
-      <div>
-        <div class="panel">
-          <strong id="membersH">Members</strong>
-          <div class="muted small">Add & edit members (name + gender). Members show in public index.</div>
-          <div style="margin-top:10px;display:grid;gap:8px">
-            <div class="row">
-              <input id="memberName" class="col" placeholder="Full name" />
-              <select id="memberGender" style="width:110px">
-                <option value="">Gender</option>
-                <option value="Male">Male</option>
-                <option value="Female">Female</option>
-              </select>
-            </div>
-            <div style="display:flex;gap:8px">
-              <button id="btnAddMember">Add member</button>
-              <button id="btnRefreshMembers" class="muted-btn">Refresh</button>
-            </div>
-          </div>
-          <div class="list" id="membersList"></div>
-        </div>
+# stored in memory while process runs (sha returned by GitHub) - kept for visibility
+_GITHUB_SHA = None
 
-        <div class="panel" style="margin-top:12px">
-          <strong id="attH">Attendance</strong>
-          <div class="muted small">Mark Present / Absent per Sunday. Edits timestamped.</div>
-          <div style="margin-top:10px;display:grid;gap:8px">
-            <input type="date" id="attDate" />
-            <div style="display:flex;gap:8px">
-              <button id="btnLoadAttendance" class="muted-btn">Load</button>
-              <button id="btnToday" class="muted-btn">This Sunday</button>
-            </div>
-          </div>
-          <div class="list" id="attendanceList"></div>
-        </div>
-
-        <div class="panel" style="margin-top:12px">
-          <strong>Admins</strong>
-          <div class="muted small">Add additional admins (requires admin session)</div>
-          <div style="margin-top:8px;display:grid;gap:8px">
-            <div class="row"><input id="newAdminName" class="col" placeholder="Name" /><input id="newAdminPass" placeholder="Password" type="password" style="width:150px" /></div>
-            <div style="display:flex;gap:8px"><button id="btnAddAdmin">Add admin</button><button id="btnListAdmins" class="muted-btn">List</button></div>
-          </div>
-          <div class="list" id="adminsList"></div>
-        </div>
-      </div>
-
-      <!-- RIGHT COLUMN: post content (editable) & prayers & staff & finance -->
-      <div>
-        <div class="panel">
-          <strong>Post content</strong>
-          <div class="muted small">Post Bible study, Events, Announcements (summons), or Resources for the public index. You can edit or delete existing posts here.</div>
-          <div style="margin-top:10px;display:grid;gap:8px">
-            <input id="contentTitleInput" placeholder="Title" />
-            <input id="contentSubInput" placeholder="Date / Passage / Location / URL" />
-            <textarea id="contentNotesInput" placeholder="Notes / Description"></textarea>
-            <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <button id="btnPostBible">Post Bible study</button>
-              <button id="btnPostEvent" style="background:#3b82f6">Post event</button>
-              <button id="btnPostSummon" style="background:#ef4444">Post announcement</button>
-              <button id="btnPostResource" style="background:#0ea5a4">Add resource</button>
-            </div>
-          </div>
-
-          <!-- Editable lists for each collection -->
-          <div style="margin-top:12px">
-            <strong style="display:block;margin-bottom:8px">Manage posted content</strong>
-
-            <div style="margin-top:8px">
-              <div style="font-weight:700">Events</div>
-              <div id="eventsListEditable" class="list"></div>
-            </div>
-
-            <div style="margin-top:8px">
-              <div style="font-weight:700">Announcements</div>
-              <div id="summonsListEditable" class="list"></div>
-            </div>
-
-            <div style="margin-top:8px">
-              <div style="font-weight:700">Bible studies</div>
-              <div id="bibleListEditable" class="list"></div>
-            </div>
-
-            <div style="margin-top:8px">
-              <div style="font-weight:700">Resources</div>
-              <div id="resourcesListEditable" class="list"></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="panel" style="margin-top:12px">
-          <strong>Donations</strong>
-          <div class="muted small">Add & edit donation records quickly.</div>
-          <div style="margin-top:8px;display:flex;gap:8px">
-            <input id="donorName" class="col" placeholder="Donor" />
-            <input id="donAmount" placeholder="Amount" style="width:140px" />
-            <div style="width:120px"><button id="btnAddDonation">Add</button></div>
-          </div>
-          <div class="list" id="donationsList"></div>
-        </div>
-
-        <div class="panel" style="margin-top:12px">
-          <strong>Finance / Contributions</strong>
-          <div class="muted small">Record tithes, offerings, pledges, special gifts. Finance page is read-only for public.</div>
-          <div style="margin-top:8px;display:grid;gap:8px">
-            <div class="row">
-              <input id="contribName" class="col" placeholder="Name (or Anonymous)" />
-              <input id="contribAmount" placeholder="Amount" style="width:140px" />
-            </div>
-            <div class="row">
-              <select id="contribCategory" style="width:180px">
-                <option value="tithe">Tithe</option>
-                <option value="offering">Offering</option>
-                <option value="pledge">Pledge</option>
-                <option value="special">Special</option>
-                <option value="other">Other</option>
-              </select>
-              <input id="contribDate" type="date" style="width:180px" />
-            </div>
-            <textarea id="contribNote" placeholder="Note (optional)"></textarea>
-            <div style="display:flex;gap:8px">
-              <button id="btnAddContrib">Add Contribution</button>
-              <button id="btnListContrib" class="muted-btn">List / Refresh</button>
-              <a class="muted-btn" href="/finance" target="_blank">Open Finance page</a>
-            </div>
-          </div>
-          <div class="list" id="contributionsList" style="margin-top:10px"></div>
-        </div>
-
-        <div class="panel" style="margin-top:12px">
-          <strong>Prayer Requests (Inbox)</strong>
-          <div class="muted small">Reply to prayer requests; replies appear on the public prayers page.</div>
-          <div class="list" id="prayersList"></div>
-        </div>
-
-        <!-- People in charge / staff panel -->
-        <div class="panel" style="margin-top:12px">
-          <strong>People in charge</strong>
-          <div class="muted small">Add staff / pastors (they are not full admins). Assign permissions for what they can do.</div>
-
-          <div style="margin-top:8px;display:grid;gap:8px">
-            <div class="row">
-              <input id="staffName" class="col" placeholder="Name (e.g., Pastor John)" />
-              <input id="staffPass" placeholder="Password" type="password" style="width:140px" />
-            </div>
-            <input id="staffContact" placeholder="Contact (phone or email) — optional" />
-
-            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-              <select id="staffRole" style="width:180px">
-                <option value="">Role (optional)</option>
-                <option>Pastor</option>
-                <option>Coordinator</option>
-                <option>Deacon</option>
-              </select>
-
-              <label class="small"><input type="checkbox" id="perm_reply" /> Reply prayers</label>
-              <label class="small"><input type="checkbox" id="perm_view_members" /> View members</label>
-              <label class="small"><input type="checkbox" id="perm_add_don" /> Add donations</label>
-              <label class="small"><input type="checkbox" id="perm_post_content" /> Post content</label>
-              <label class="small"><input type="checkbox" id="perm_manage_finance" /> Manage finance</label>
-            </div>
-
-            <div style="display:flex;gap:8px;margin-top:6px">
-              <button id="btnAddStaff">Add person in charge</button>
-              <button id="btnListStaff" class="muted-btn">List</button>
-            </div>
-          </div>
-
-          <div class="list" id="staffList" style="margin-top:10px"></div>
-        </div>
-
-      </div>
-    </div>
-
-    <footer>© Church Hub — Local demo</footer>
-  </div>
-
-  <!-- Edit modal (reused for members, events, summons, bible, resources, donations) -->
-  <div id="modalBackdrop" class="modal-backdrop" role="dialog" aria-modal="true">
-    <div class="modal" role="document">
-      <h3 id="modalTitle">Edit</h3>
-      <div id="modalBody" style="display:grid;gap:8px">
-        <!-- dynamic fields inserted here -->
-      </div>
-      <div class="actions">
-        <button id="modalSave">Save</button>
-        <button id="modalCancel" class="muted-btn">Cancel</button>
-      </div>
-    </div>
-  </div>
-
-<script>
-// Lightweight admin front-end (mobile-first). Uses same endpoints in your app.py.
-const api = async (path, opts={}) => {
-  opts.credentials = 'same-origin';
-  if(opts.body && typeof opts.body === 'object'){
-    opts.headers = opts.headers || {}; opts.headers['Content-Type']='application/json'; opts.body = JSON.stringify(opts.body);
-  }
-  const res = await fetch(path, opts);
-  const txt = await res.text(); try{ return JSON.parse(txt); }catch(e){ return txt; }
-};
-
-function toast(msg, t=1600){ const id='__toast__'; let el=document.getElementById(id); if(!el){ el=document.createElement('div'); el.id=id; el.style.position='fixed'; el.style.right='14px'; el.style.bottom='14px'; el.style.padding='10px 12px'; el.style.background='#071028'; el.style.color='white'; el.style.borderRadius='10px'; el.style.zIndex=99999; document.body.appendChild(el);} el.textContent=msg; el.style.display='block'; setTimeout(()=>el.style.display='none',t);} 
-
-// i18n buttons
-document.getElementById('langEn').addEventListener('click', ()=>{ localStorage.setItem('ch_lang','en'); document.getElementById('langEn').classList.add('active'); document.getElementById('langSw').classList.remove('active'); });
-document.getElementById('langSw').addEventListener('click', ()=>{ localStorage.setItem('ch_lang','sw'); document.getElementById('langSw').classList.add('active'); document.getElementById('langEn').classList.remove('active'); });
-if(localStorage.getItem('ch_lang')==='sw') document.getElementById('langSw').classList.add('active'); else document.getElementById('langEn').classList.add('active');
-
-// small helper
-function escape(s){ return String(s||'').replace(/[&<>\"']/g, c => ({'&':'&amp;','<' :'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-
-// AUTH flow (register first admin if missing)
-async function adminExists(){ try{ const r = await fetch('/api/admin/exists'); const j = await r.json(); return j.exists; }catch(e){ return true; } }
-async function boot(){ const exists = await adminExists(); if(!exists){ document.getElementById('registerPanel').style.display='block'; document.getElementById('loginPanel').style.display='none'; } else { document.getElementById('loginPanel').style.display='block'; document.getElementById('registerPanel').style.display='none'; } }
-
-// register/login
-document.getElementById('btnShowLogin').addEventListener('click', ()=>{ document.getElementById('registerPanel').style.display='none'; document.getElementById('loginPanel').style.display='block'; });
-document.getElementById('btnShowRegister').addEventListener('click', ()=>{ document.getElementById('registerPanel').style.display='block'; document.getElementById('loginPanel').style.display='none'; });
-
-document.getElementById('btnRegister').addEventListener('click', async ()=>{
-  const name=document.getElementById('regName').value.trim(); const pass=document.getElementById('regPass').value;
-  if(!name||!pass){ toast('name & password'); return; }
-  try{ const j=await api('/api/admin/register',{method:'POST', body:{name, password: pass}}); afterLogin(j.admin.name); toast('admin created'); }catch(e){ console.error(e); toast(e.error||'register failed'); }
-});
-
-document.getElementById('btnLogin').addEventListener('click', async ()=>{
-  const name=document.getElementById('loginName').value.trim(); const pass=document.getElementById('loginPass').value;
-  if(!name||!pass){ toast('name & password'); return; }
-  try{ const j=await api('/api/admin/login',{method:'POST', body:{name, password: pass}}); afterLogin(j.admin.name); toast('welcome'); }catch(e){ console.error(e); toast(e.error||'login failed'); }
-});
-
-document.getElementById('logoutBtn').addEventListener('click', async ()=>{ try{ await api('/api/admin/logout',{method:'POST'}); location.reload(); }catch(e){ location.reload(); } });
-
-function afterLogin(name){ document.getElementById('authWrap').style.display='none'; document.getElementById('dashboard').classList.remove('hidden'); document.getElementById('logoutBtn').classList.remove('hidden'); refreshAll(); }
-
-// ---------- MEMBERS (add/edit/delete) ----------
-async function loadMembers(){
-  try{
-    const j = await api('/api/admin/members');
-    const el = document.getElementById('membersList');
-    el.innerHTML = j.length ? j.map(m=>`
-      <div class="item">
-        <div><div class="label">${escape(m.name)}</div><div class="muted">${escape(m.gender||'')}</div></div>
-        <div style="display:flex;gap:8px">
-          <button class="muted-btn" onclick="showEditMember('${m.id}')">Edit</button>
-          <button class="muted-btn danger" onclick="removeMember('${m.id}')">Remove</button>
-        </div>
-      </div>
-    `).join('') : '<div class="muted">No members yet</div>';
-  }catch(e){
-    console.warn(e);
-    try{ const pub = await api('/api/public'); const members = pub.members || []; document.getElementById('membersList').innerHTML = members.length? members.map(m=>`<div class="item"><div><div class="label">${escape(m.name)}</div><div class="muted">${escape(m.gender||'')}</div></div></div>`).join('') : '<div class="muted">No members yet</div>'; }catch(ee){ document.getElementById('membersList').innerHTML = '<div class="muted">Unable to load</div>'; }
-  }
-}
-
-document.getElementById('btnAddMember').addEventListener('click', async ()=>{
-  const name=document.getElementById('memberName').value.trim(); const gender=document.getElementById('memberGender').value;
-  if(!name){ toast('enter name'); return; }
-  try{ await api('/api/admin/members',{method:'POST', body:{name, gender}}); document.getElementById('memberName').value=''; document.getElementById('memberGender').value=''; toast('added'); await loadMembers(); await loadAttendance(); }catch(e){ console.error(e); toast(e.error||'failed'); }
-});
-
-window.removeMember = async function(id){
-  if(!confirm('Remove?')) return;
-  try{ await api('/api/admin/members',{method:'DELETE', body:{id}}); toast('removed'); await loadMembers(); await loadAttendance(); }catch(e){ console.error(e); toast(e.error||'failed'); }
-};
-
-window.showEditMember = async function(id){
-  try{
-    // fetch member (we can fetch list and find, or call /api/admin/members GET)
-    const list = await api('/api/admin/members');
-    const m = (list||[]).find(x=>x.id===id);
-    if(!m) return toast('Member not found');
-    const body = document.getElementById('modalBody');
-    body.innerHTML = `
-      <input id="modal_field_name" placeholder="Full name" value="${escape(m.name)}" />
-      <select id="modal_field_gender">
-        <option value="">Gender</option>
-        <option value="Male"${m.gender==='Male'?' selected':''}>Male</option>
-        <option value="Female"${m.gender==='Female'?' selected':''}>Female</option>
-      </select>
-    `;
-    showModal('Edit member', async ()=>{
-      const newName = document.getElementById('modal_field_name').value.trim();
-      const newGender = document.getElementById('modal_field_gender').value;
-      if(!newName){ toast('Name required'); return false; }
-      try{
-        await api('/api/admin/members',{method:'PUT', body:{id, name:newName, gender:newGender}});
-        toast('Saved'); await loadMembers(); await loadAttendance();
-        return true;
-      }catch(e){ console.error(e); toast(e.error||'failed'); return false; }
-    });
-  }catch(e){ console.error(e); toast('Unable to edit'); }
-};
-
-// ---------- ATTENDANCE ----------
-function nearestSunday(){ const d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-d.getDay()); return d.toISOString().slice(0,10);} 
-document.getElementById('btnToday').addEventListener('click', ()=>{ document.getElementById('attDate').value = nearestSunday(); loadAttendance(); });
-document.getElementById('btnLoadAttendance').addEventListener('click', loadAttendance);
-
-async function loadAttendance(){
-  try{
-    let members;
-    try{ members = await api('/api/admin/members'); }catch(e){ const pub = await api('/api/public'); members = pub.members || []; }
-    const pub = await api('/api/public'); const map = pub.attendance || {}; const date = document.getElementById('attDate').value || nearestSunday(); document.getElementById('attDate').value = date; const day = map[date] || {};
-    const html = members.length? members.map(m=>{ const rec = day[m.id]; const status = rec? (rec.status==='present'? 'present':'absent'):'not marked'; const edited = rec && rec.edited_at?` • edited ${rec.edited_at}`:''; return `<div class="item"><div><div class="label">${escape(m.name)}</div><div class="muted">${m.gender||''} • ${status}${edited}</div></div><div style="display:flex;gap:8px"><button onclick="setAttendance('${date}','${m.id}','present')" style="background:#10b981">Present</button><button onclick="setAttendance('${date}','${m.id}','absent')" style="background:#ef4444">Absent</button></div></div>` }).join('') : '<div class="muted">No members</div>';
-    document.getElementById('attendanceList').innerHTML = html;
-  }catch(e){ console.error(e); document.getElementById('attendanceList').innerHTML = '<div class="muted">Unable to load</div>'; }
-}
-
-async function setAttendance(date,id,status){ try{ await api('/api/admin/attendance',{ method:'POST', body:{ date, id, status }}); toast('saved'); await loadAttendance(); }catch(e){ console.error(e); toast(e.error||'failed'); } }
-
-// ---------- CONTENT posting & editable lists ----------
-async function postContent(kind){
-  const title = document.getElementById('contentTitleInput').value.trim();
-  const sub = document.getElementById('contentSubInput').value.trim();
-  const notes = document.getElementById('contentNotesInput').value.trim();
-  if(!title) return toast('Title required');
-  try{
-    if(kind==='bible') await api('/api/admin/bible',{method:'POST', body:{title, passage:sub, notes}});
-    if(kind==='event') await api('/api/admin/events',{method:'POST', body:{title, date:sub, location:'', description:notes}});
-    if(kind==='summon') await api('/api/admin/summons',{method:'POST', body:{title, body:notes}});
-    if(kind==='resource') await api('/api/admin/resources',{method:'POST', body:{title, url:sub}});
-    toast('Posted'); document.getElementById('contentTitleInput').value=''; document.getElementById('contentSubInput').value=''; document.getElementById('contentNotesInput').value=''; await loadAllContent();
-  }catch(e){ console.error(e); toast(e.error||'failed'); }
-}
-document.getElementById('btnPostBible').addEventListener('click', ()=>postContent('bible'));
-document.getElementById('btnPostEvent').addEventListener('click', ()=>postContent('event'));
-document.getElementById('btnPostSummon').addEventListener('click', ()=>postContent('summon'));
-document.getElementById('btnPostResource').addEventListener('click', ()=>postContent('resource'));
-
-// render editable lists and add Edit/Delete actions
-async function loadAllContent(){
-  await Promise.allSettled([
-    loadCollectionEditable('events', 'eventsListEditable'),
-    loadCollectionEditable('summons', 'summonsListEditable'),
-    loadCollectionEditable('bible', 'bibleListEditable'),
-    loadCollectionEditable('resources', 'resourcesListEditable'),
-    loadDonations(),
-    loadContributions()
-  ]);
-}
-
-async function loadCollectionEditable(collection, targetId){
-  try{
-    const j = await api(`/api/admin/${collection}`, {method:'GET'});
-    const el = document.getElementById(targetId);
-    if(!Array.isArray(j) || j.length===0){ el.innerHTML = '<div class="muted">No items</div>'; return; }
-    el.innerHTML = j.map(it=>{
-      const title = escape(it.title || it.name || '(no title)');
-      // show small meta
-      const meta = (collection==='events') ? escape((it.date||'') + ' ' + (it.location||'')) : (collection==='bible'? escape(it.passage||''): (collection==='resources'? (it.url? `<div class="muted small">${escape(it.url)}</div>` : '') : ''));
-      return `<div class="item"><div style="flex:1"><div class="label">${title}</div><div class="muted small" style="margin-top:6px">${escape(it.description||it.body||it.notes||'')}</div>${meta||''}</div><div style="display:flex;flex-direction:column;gap:6px"><button class="muted-btn" onclick="editContentItem('${collection}','${it.id}')">Edit</button><button class="muted-btn danger" onclick="deleteContentItem('${collection}','${it.id}')">Delete</button></div></div>`;
-    }).join('');
-  }catch(e){ console.error(e); document.getElementById(targetId).innerHTML = '<div class="muted">Unable to load</div>'; }
-}
-
-window.editContentItem = async function(collection, id){
-  try{
-    const it = await api(`/api/admin/${collection}/${id}`, {method:'GET'});
-    if(!it || it.ok===false) return toast('Not found');
-    const body = document.getElementById('modalBody');
-    // build fields depending on collection
-    if(collection==='events'){
-      body.innerHTML = `
-        <input id="modal_title" placeholder="Title" value="${escape(it.title)}" />
-        <input id="modal_date" type="date" value="${(it.date||'').slice(0,10)}" />
-        <input id="modal_location" placeholder="Location" value="${escape(it.location||'')}" />
-        <textarea id="modal_description" placeholder="Description">${escape(it.description||'')}</textarea>
-      `;
-    } else if(collection==='summons'){
-      body.innerHTML = `
-        <input id="modal_title" placeholder="Title" value="${escape(it.title)}" />
-        <textarea id="modal_body" placeholder="Body">${escape(it.body||'')}</textarea>
-      `;
-    } else if(collection==='bible'){
-      body.innerHTML = `
-        <input id="modal_title" placeholder="Title" value="${escape(it.title)}" />
-        <input id="modal_passage" placeholder="Passage" value="${escape(it.passage||'')}" />
-        <textarea id="modal_notes" placeholder="Notes">${escape(it.notes||'')}</textarea>
-      `;
-    } else if(collection==='resources'){
-      body.innerHTML = `
-        <input id="modal_title" placeholder="Title" value="${escape(it.title)}" />
-        <input id="modal_url" placeholder="URL" value="${escape(it.url||'')}" />
-        <textarea id="modal_notes" placeholder="Notes">${escape(it.notes||'')}</textarea>
-      `;
-    } else {
-      body.innerHTML = `<div class="muted">No editor for this type</div>`;
+def load_from_github():
+    """Returns (data_dict, sha) or (None, None) if failed."""
+    if not GITHUB_TOKEN or not REPO:
+        return None, None
+    url = f"https://api.github.com/repos/{REPO}/contents/{DB_PATH}?ref={BRANCH}"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "TomorrowAI-GitHub-DB/1"
     }
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+    except Exception:
+        return None, None
+    if r.status_code == 200:
+        payload = r.json()
+        content = payload.get("content", "")
+        if payload.get("encoding") == "base64" and content:
+            try:
+                decoded = base64.b64decode(content).decode("utf-8")
+                data = json.loads(decoded)
+                return data, payload.get("sha")
+            except Exception:
+                return None, None
+    return None, None
 
-    showModal('Edit ' + collection.slice(0, -1), async ()=>{
-      try{
-        let payload = {};
-        if(collection==='events'){
-          payload = { title: document.getElementById('modal_title').value.trim(), date: document.getElementById('modal_date').value, location: document.getElementById('modal_location').value.trim(), description: document.getElementById('modal_description').value.trim() };
-        } else if(collection==='summons'){
-          payload = { title: document.getElementById('modal_title').value.trim(), body: document.getElementById('modal_body').value.trim() };
-        } else if(collection==='bible'){
-          payload = { title: document.getElementById('modal_title').value.trim(), passage: document.getElementById('modal_passage').value.trim(), notes: document.getElementById('modal_notes').value.trim() };
-        } else if(collection==='resources'){
-          payload = { title: document.getElementById('modal_title').value.trim(), url: document.getElementById('modal_url').value.trim(), notes: document.getElementById('modal_notes').value.trim() };
+def save_to_github(data, sha=None):
+    """
+    Saves data to the repo path. Returns (success_bool, new_sha_or_None, status_code, response_text).
+    """
+    if not GITHUB_TOKEN or not REPO:
+        return False, None, None, "no token/repo configured"
+    url = f"https://api.github.com/repos/{REPO}/contents/{DB_PATH}"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "TomorrowAI-GitHub-DB/1"
+    }
+    content_b64 = base64.b64encode(json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")).decode("utf-8")
+    payload = {"message": "Update database (auto)", "content": content_b64, "branch": BRANCH}
+    if sha:
+        payload["sha"] = sha
+    try:
+        r = requests.put(url, headers=headers, json=payload, timeout=20)
+    except Exception as e:
+        return False, None, None, str(e)
+    if r.status_code in (200, 201):
+        try:
+            new_sha = r.json().get("content", {}).get("sha")
+            return True, new_sha, r.status_code, r.text
+        except Exception:
+            return True, None, r.status_code, r.text
+    else:
+        return False, None, r.status_code, r.text
+
+# ------------------ Flask + app setup ------------------
+
+app = Flask(__name__, static_folder=str(ROOT))
+app.secret_key = os.getenv("FLASK_SECRET", "CHANGE-THIS-TO-A-SECURE-RANDOM-STRING")
+
+DEFAULT_DATA = {
+    "admins": [],
+    "staff": [],
+    "members": [],
+    "attendance": {},
+    "events": [],
+    "summons": [],       # announcements
+    "bible": [],
+    "resources": [],
+    "donations": [],
+    "contributions": [], # tithes / offerings / pledges (new collection)
+    "prayers": [],
+    "pulses": []         # external pulses received via /pulse_receiver
+}
+
+START_TIME = datetime.datetime.utcnow()
+app.config.setdefault("KEEPALIVE_RUNNING", False)
+app.config.setdefault("KEEPALIVE_STARTED", False)
+app.config.setdefault("LAST_PINGS", {})
+app.config.setdefault("GITHUB_SHA", None)
+app.config.setdefault("LAST_GITHUB_STATUS", None)  # {ok: bool, code: int, text: str}
+
+# Optional PULSE_SECRET to require X-PULSE-TOKEN or ?token= on /pulse_receiver
+PULSE_SECRET = os.getenv("PULSE_SECRET")
+
+def now():
+    return datetime.datetime.utcnow().isoformat() + "Z"
+
+# ------------------ load/save data (GitHub-aware) ------------------
+
+def load_data():
+    """Loads data from GitHub if configured, otherwise from local file. Ensures DEFAULT_DATA keys exist and returns dict."""
+    global _GITHUB_SHA
+    # Try GitHub first
+    if GITHUB_TOKEN and REPO:
+        db, sha = load_from_github()
+        if isinstance(db, dict):
+            _GITHUB_SHA = sha
+            for k, v in DEFAULT_DATA.items():
+                if k not in db:
+                    db[k] = v
+            # local cache (best-effort)
+            try:
+                with open(LOCAL_DATA_FILE, "w", encoding="utf-8") as f:
+                    json.dump(db, f, indent=2, ensure_ascii=False)
+            except Exception:
+                pass
+            app.config["GITHUB_SHA"] = _GITHUB_SHA
+            return db
+    # Fallback to local file
+    if not LOCAL_DATA_FILE.exists():
+        try:
+            with open(LOCAL_DATA_FILE, "w", encoding="utf-8") as f:
+                json.dump(DEFAULT_DATA.copy(), f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+    try:
+        with open(LOCAL_DATA_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        data = DEFAULT_DATA.copy()
+        try:
+            with open(LOCAL_DATA_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+    for k, v in DEFAULT_DATA.items():
+        if k not in data:
+            data[k] = v
+    return data
+
+def save_data(data):
+    """
+    Saves data either to GitHub (if configured) or to local file.
+    Strategy:
+      - If GitHub configured, attempt up to 5 times: fetch latest SHA, PUT with that SHA.
+      - On success: update local cache and app.config["GITHUB_SHA"] & LAST_GITHUB_STATUS, return True.
+      - If all GitHub attempts fail: write local cache (fallback) and set LAST_GITHUB_STATUS accordingly.
+    """
+    global _GITHUB_SHA
+    last_status = {"ok": False, "code": None, "text": None}
+    # If GitHub configured, attempt robust save
+    if GITHUB_TOKEN and REPO:
+        attempts = 5
+        for attempt in range(attempts):
+            latest_db, latest_sha = load_from_github()
+            # latest_sha may be None if file doesn't exist yet; that's OK (GitHub allows creating the file)
+            success, new_sha, status_code, resp_text = save_to_github(data, sha=latest_sha)
+            last_status["ok"] = bool(success)
+            last_status["code"] = status_code
+            last_status["text"] = (resp_text[:1000] if isinstance(resp_text, str) else str(resp_text))
+            app.config["LAST_GITHUB_STATUS"] = last_status
+            if success:
+                _GITHUB_SHA = new_sha
+                app.config["GITHUB_SHA"] = _GITHUB_SHA
+                try:
+                    with open(LOCAL_DATA_FILE, "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=2, ensure_ascii=False)
+                except Exception:
+                    pass
+                app.logger.info("save_data: saved to GitHub (sha=%s)", _GITHUB_SHA)
+                return True
+            # Retry on conflicts / validation issues
+            if status_code in (409, 422):
+                time.sleep(0.25 + attempt * 0.1)
+                continue
+            # for transient network issues status_code may be None - optionally retry
+            if status_code is None:
+                time.sleep(0.25)
+                continue
+            # other errors -> break and fallback
+            break
+
+        # If we reach here, GitHub writes failed after retries -> fallback to local cache
+        try:
+            with open(LOCAL_DATA_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            app.logger.warning("save_data: GitHub writes failed, saved locally as fallback. last_status=%s", last_status)
+            return True
+        except Exception as e:
+            app.logger.exception("save_data: failed to save locally after GitHub failure: %s", e)
+            return False
+    else:
+        # Pure local mode
+        try:
+            with open(LOCAL_DATA_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            app.config["LAST_GITHUB_STATUS"] = {"ok": False, "code": None, "text": "no-github-config"}
+            return True
+        except Exception as e:
+            app.logger.exception("save_data: failed to save local data: %s", e)
+            return False
+
+# ------------------ decorators ------------------
+
+def admin_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not session.get("admin_id"):
+            return jsonify({"ok": False, "error": "Admin login required"}), 403
+        return fn(*args, **kwargs)
+    return wrapper
+
+def staff_or_admin_allowed(check_perm_name=None):
+    def outer(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if session.get("admin_id"):
+                return fn(*args, **kwargs)
+            sid = session.get("staff_id")
+            if not sid:
+                return jsonify({"ok": False, "error": "Login required"}), 403
+            data = load_data()
+            staff = next((s for s in data.get("staff", []) if s["id"] == sid), None)
+            if not staff:
+                return jsonify({"ok": False, "error": "Staff not found"}), 403
+            if check_perm_name and not staff.get("perms", {}).get(check_perm_name):
+                return jsonify({"ok": False, "error": "Permission denied"}), 403
+            return fn(*args, **kwargs)
+        return wrapper
+    return outer
+
+# ------------------ static pages ------------------
+
+@app.route("/")
+def home():
+    return send_from_directory(str(ROOT), "index.html")
+
+@app.route("/prayers")
+def prayers_page():
+    return send_from_directory(str(ROOT), "prayers.html")
+
+@app.route("/admin")
+def admin_page():
+    return send_from_directory(str(ROOT), "admin.html")
+
+# explicit finance route so /finance works (serves finance.html)
+@app.route("/finance")
+def finance_page():
+    return send_from_directory(str(ROOT), "finance.html")
+
+@app.route("/staff")
+def staff_page():
+    file = ROOT / "staff.html"
+    if file.exists():
+        return send_from_directory(str(ROOT), "staff.html")
+    return "Staff page not created. Add staff.html in project root.", 404
+
+@app.route("/<path:p>")
+def static_files(p):
+    file = ROOT / p
+    if file.exists() and file.is_file():
+        return send_from_directory(str(ROOT), p)
+    return "Not Found", 404
+
+@app.route("/manifest.json")
+def manifest():
+    return send_from_directory(str(ROOT), "manifest.json")
+
+@app.route("/sw.js")
+def sw():
+    return send_from_directory(str(ROOT), "sw.js")
+
+# ------------------ public APIs ------------------
+
+@app.route("/api/public")
+def api_public():
+    d = load_data()
+    public_staff = [{"id": s["id"], "name": s["name"], "role": s.get("role",""), "contact": s.get("contact","")} for s in d.get("staff", [])]
+    # Return contributions so finance.html can consume them
+    return jsonify({
+        "members": d["members"],
+        "attendance": d["attendance"],
+        "events": d["events"],
+        "summons": d["summons"],
+        "bible": d["bible"],
+        "resources": d["resources"],
+        "donations": d["donations"],
+        "contributions": d["contributions"],
+        "staff": public_staff
+    })
+
+# ------------------ prayers (public) ------------------
+
+@app.route("/api/prayers", methods=["GET", "POST"])
+def api_prayers():
+    data = load_data()
+    if request.method == "POST":
+        j = request.get_json() or {}
+        body = (j.get("body") or "").strip()
+        name = (j.get("name") or "Anonymous").strip()
+        assigned_to = (j.get("assigned_to") or "").strip()
+        if not body:
+            return jsonify({"ok": False, "error": "Prayer cannot be empty"}), 400
+        assigned_name = ""
+        if assigned_to:
+            staff = next((s for s in data.get("staff", []) if s["id"] == assigned_to), None)
+            if staff:
+                assigned_name = staff.get("name","")
+            else:
+                assigned_to = ""
+                assigned_name = ""
+        prayer = {
+            "id": str(uuid.uuid4()),
+            "name": name,
+            "body": body,
+            "assigned_to": assigned_to,
+            "assigned_name": assigned_name,
+            "reply": "",
+            "status": "open",
+            "created_at": now(),
+            "updated_at": now()
         }
-        await api(`/api/admin/${collection}/${id}`, { method:'PUT', body: payload });
-        toast('Saved'); await loadAllContent();
-        return true;
-      }catch(e){ console.error(e); toast(e.error||'failed'); return false; }
-    });
-  }catch(e){ console.error(e); toast('Unable to load item'); }
-};
+        data["prayers"].insert(0, prayer)
+        save_data(data)
+        return jsonify({"ok": True, "prayer": prayer})
+    return jsonify(data["prayers"])
 
-window.deleteContentItem = async function(collection, id){
-  if(!confirm('Delete this item?')) return;
-  try{
-    await api(`/api/admin/${collection}/${id}`, { method:'DELETE' });
-    toast('Deleted'); await loadAllContent();
-  }catch(e){ console.error(e); toast(e.error||'failed'); }
-};
+# ------------------ admin auth ------------------
 
-// ---------- DONATIONS (add/edit/delete) ----------
-document.getElementById('btnAddDonation').addEventListener('click', async ()=>{
-  const name=document.getElementById('donorName').value.trim()||'Anonymous';
-  const amount=parseFloat(document.getElementById('donAmount').value)||0;
-  if(!amount) return toast('amount');
-  try{ await api('/api/admin/donations',{method:'POST', body:{name, amount}}); document.getElementById('donorName').value=''; document.getElementById('donAmount').value=''; toast('Donation added'); await loadDonations(); }catch(e){ console.error(e); toast(e.error||'failed'); }
-});
+@app.route("/api/admin/exists")
+def admin_exists():
+    return jsonify({"exists": bool(load_data()["admins"])})
 
-async function loadDonations(){
-  try{
-    const j = await api('/api/admin/donations');
-    const el=document.getElementById('donationsList');
-    el.innerHTML = j.length? j.map(d=>`<div class="item"><div><div class="label">${escape(d.name)}</div><div class="muted">KES ${escape(String(d.amount))} • ${escape(d.created_at||'')}</div></div><div style="display:flex;flex-direction:column;gap:6px"><button class="muted-btn" onclick="editDonation('${d.id}')">Edit</button><button class="muted-btn danger" onclick="removeDonation('${d.id}')">Delete</button></div></div>`).join('') : '<div class="muted">No donations</div>';
-  }catch(e){ console.warn(e); document.getElementById('donationsList').innerHTML = '<div class="muted">Unable to load</div>'; }
-}
+@app.route("/api/admin/register", methods=["POST"])
+def admin_register():
+    data = load_data()
+    if data["admins"]:
+        return jsonify({"ok": False, "error": "Admin already exists"}), 400
+    j = request.get_json() or {}
+    name = (j.get("name") or "").strip()
+    password = j.get("password") or ""
+    if not name or not password:
+        return jsonify({"ok": False, "error": "Name & password required"}), 400
+    admin = {"id": str(uuid.uuid4()), "name": name, "pass_hash": generate_password_hash(password), "created_at": now()}
+    data["admins"] = [admin]
+    save_data(data)
+    session.clear()
+    session["admin_id"] = admin["id"]
+    session["admin_name"] = admin["name"]
+    return jsonify({"ok": True, "admin": {"id": admin["id"], "name": admin["name"]}})
 
-window.editDonation = async function(id){
-  try{
-    const list = await api('/api/admin/donations'); const item = (list||[]).find(x=>x.id===id);
-    if(!item) return toast('Not found');
-    const body = document.getElementById('modalBody');
-    body.innerHTML = `
-      <input id="modal_donor" placeholder="Donor" value="${escape(item.name)}" />
-      <input id="modal_amount" placeholder="Amount" value="${escape(String(item.amount||''))}" />
-      <textarea id="modal_note" placeholder="Note">${escape(item.note||'')}</textarea>
-    `;
-    showModal('Edit donation', async ()=>{
-      const name = document.getElementById('modal_donor').value.trim()||'Anonymous';
-      const amount = parseFloat(document.getElementById('modal_amount').value) || 0;
-      const note = document.getElementById('modal_note').value || '';
-      if(!amount) { toast('Enter amount'); return false; }
-      try{
-        await api('/api/admin/donations/'+id, { method:'PUT', body:{ name, amount, note } });
-        toast('Saved'); await loadDonations();
-        return true;
-      }catch(e){ console.error(e); toast(e.error||'failed'); return false; }
-    });
-  }catch(e){ console.error(e); toast('Unable to edit'); }
-};
+@app.route("/api/admin/login", methods=["POST"])
+def admin_login():
+    j = request.get_json() or {}
+    name = (j.get("name") or "").strip()
+    password = j.get("password") or ""
+    for admin in load_data()["admins"]:
+        if admin["name"] == name and check_password_hash(admin["pass_hash"], password):
+            session.clear()
+            session["admin_id"] = admin["id"]
+            session["admin_name"] = admin["name"]
+            return jsonify({"ok": True, "admin": {"id": admin["id"], "name": admin["name"]}})
+    return jsonify({"ok": False, "error": "Invalid credentials"}), 401
 
-window.removeDonation = async function(id){
-  if(!confirm('Delete donation?')) return;
-  try{ await api('/api/admin/donations/'+id, { method:'DELETE' }); toast('Deleted'); await loadDonations(); }catch(e){ console.error(e); toast(e.error||'failed'); }
-};
+@app.route("/api/admin/logout", methods=["POST"])
+def admin_logout():
+    session.clear()
+    return jsonify({"ok": True})
 
-// ---------- CONTRIBUTIONS (existing handlers kept) ----------
-document.getElementById('btnAddContrib').addEventListener('click', async ()=>{
-  const name = (document.getElementById('contribName').value.trim() || 'Anonymous');
-  const amount = parseFloat(document.getElementById('contribAmount').value) || 0;
-  const category = document.getElementById('contribCategory').value;
-  const date = document.getElementById('contribDate').value || new Date().toISOString().slice(0,10);
-  const note = document.getElementById('contribNote').value || '';
-  if(!amount || amount<=0) return toast('Enter valid amount');
-  try{
-    await api('/api/admin/contributions', {method:'POST', body:{name, amount, category, date, note}});
-    document.getElementById('contribName').value=''; document.getElementById('contribAmount').value=''; document.getElementById('contribNote').value='';
-    toast('Contribution added');
-    await loadContributions();
-    await loadDonations();
-    await loadAllContent();
-  }catch(e){ console.error(e); toast(e.error||'failed'); }
-});
+# ------------------ admin: additional admin management ------------------
 
-document.getElementById('btnListContrib').addEventListener('click', loadContributions);
+@app.route("/api/admin/add_admin", methods=["POST"])
+@admin_required
+def admin_add_admin():
+    data = load_data()
+    j = request.get_json() or {}
+    name = (j.get("name") or "").strip()
+    password = j.get("password") or ""
+    if not name or not password:
+        return jsonify({"ok": False, "error": "Name & password required"}), 400
+    new_admin = {"id": str(uuid.uuid4()), "name": name, "pass_hash": generate_password_hash(password), "created_at": now()}
+    data.setdefault("admins", []).append(new_admin)
+    save_data(data)
+    return jsonify({"ok": True, "admin": {"id": new_admin["id"], "name": new_admin["name"]}})
 
-async function loadContributions(){
-  try{
-    const j = await api('/api/admin/contributions');
-    const el = document.getElementById('contributionsList');
-    if(!Array.isArray(j) || j.length===0){ el.innerHTML = '<div class="muted">No contributions</div>'; return j; }
-    const html = j.map(c=>`
-      <div class="item">
-        <div style="flex:1"><div class="label">${escape(c.name)} • ${escape(c.category)}</div><div class="muted">${escape(c.date||'')} • KES ${Number(c.amount).toFixed(2)}</div><div style="margin-top:6px">${escape(c.note||'')}</div></div>
-        <div style="display:flex;flex-direction:column;gap:6px">
-          <button class="muted-btn" onclick="editContribution('${c.id}')">Edit</button>
-          <button class="muted-btn danger" onclick="removeContribution('${c.id}')">Delete</button>
-        </div>
-      </div>`).join('');
-    el.innerHTML = html;
-    return j;
-  }catch(e){ console.warn(e); document.getElementById('contributionsList').innerHTML = '<div class="muted">Unable to load</div>'; }
-}
+@app.route("/api/admin/list_admins")
+@admin_required
+def admin_list_admins():
+    data = load_data()
+    return jsonify([{"id":a["id"], "name":a["name"], "created_at": a.get("created_at")} for a in data.get("admins",[])])
 
-// reuse existing editContribution and removeContribution functions (keeps prompts modal simple)
-window.removeContribution = async function(id){
-  if(!confirm('Delete contribution?')) return;
-  try{ await api('/api/admin/contributions/'+id, {method:'DELETE'}); toast('Deleted'); await loadContributions(); }catch(e){ console.error(e); toast(e.error||'failed'); }
-};
+# ------------------ admin: members (CRUD) ------------------
 
-window.editContribution = async function(id){
-  try{
-    const list = await api('/api/admin/contributions'); const item = (list||[]).find(x=>x.id===id);
-    if(!item) return toast('Not found');
-    const newName = prompt('Name', item.name) || item.name;
-    const newAmount = prompt('Amount', item.amount) || item.amount;
-    const newCategory = prompt('Category', item.category) || item.category;
-    const newDate = prompt('Date (YYYY-MM-DD)', item.date) || item.date;
-    const newNote = prompt('Note', item.note || '') || item.note;
-    await api('/api/admin/contributions/'+id, {method:'PUT', body:{ name:newName, amount: parseFloat(newAmount)||0, category: newCategory, date:newDate, note:newNote }});
-    toast('Updated'); await loadContributions();
-  }catch(e){ console.error(e); toast(e.error||'failed'); }
-};
+@app.route("/api/admin/members", methods=["GET", "POST", "PUT", "DELETE"])
+@admin_required
+def admin_members():
+    data = load_data()
+    if request.method == "GET":
+        return jsonify(data["members"])
+    j = request.get_json() or {}
+    if request.method == "POST":
+        name = (j.get("name") or "").strip()
+        if not name:
+            return jsonify({"ok": False, "error": "Name required"}), 400
+        m = {"id": str(uuid.uuid4()), "name": name, "gender": j.get("gender",""), "created_at": now()}
+        data["members"].append(m)
+        save_data(data)
+        return jsonify({"ok": True, "member": m})
+    if request.method == "PUT":
+        mid = j.get("id")
+        if not mid:
+            return jsonify({"ok": False, "error": "id required"}), 400
+        for m in data["members"]:
+            if m["id"] == mid:
+                m["name"] = j.get("name", m.get("name",""))
+                m["gender"] = j.get("gender", m.get("gender",""))
+                m["updated_at"] = now()
+                save_data(data)
+                return jsonify({"ok": True, "member": m})
+        return jsonify({"ok": False, "error": "Member not found"}), 404
+    # DELETE
+    mid = j.get("id")
+    data["members"] = [m for m in data["members"] if m["id"] != mid]
+    for day in data["attendance"].values():
+        day.pop(mid, None)
+    save_data(data)
+    return jsonify({"ok": True})
 
-// ---------- PRAYERS ----------
-async function loadPrayers(){ try{ const j = await api('/api/prayers'); const el=document.getElementById('prayersList'); el.innerHTML = j.length? j.map(p=>`<div class="item"><div style="flex:1"><div class="label">${escape(p.name)}</div><div class="muted">${escape(p.created_at||'')}</div><div style="margin-top:8px">${escape(p.body)}</div>${p.reply?`<div style="margin-top:8px;color:#065f46"><strong>Reply:</strong> ${escape(p.reply)}</div>`:`<div style="margin-top:8px"><textarea id="reply_${p.id}" rows="2" placeholder="Write reply..."></textarea><div style="display:flex;gap:8px;margin-top:6px"><button onclick="replyPrayer('${p.id}')">Reply</button><button onclick="markAnswered('${p.id}')">Mark answered</button></div></div>`}</div></div>`).join('') : '<div class="muted">No prayers</div>'; }catch(e){ console.warn(e); document.getElementById('prayersList').innerHTML = '<div class="muted">Unable to load prayers</div>'; } }
+# ------------------ admin: attendance ------------------
 
-async function replyPrayer(id){ const txt = document.getElementById('reply_'+id).value.trim(); if(!txt) return toast('type reply'); try{ await api('/api/admin/prayers/'+id+'/reply',{method:'POST', body:{reply:txt, status:'answered'}}); toast('Replied'); await loadPrayers(); }catch(e){ console.error(e); toast(e.error||'failed'); } }
-async function markAnswered(id){ if(!confirm('Mark answered?')) return; try{ await api('/api/admin/prayers/'+id+'/reply',{method:'POST', body:{reply:'Marked answered', status:'answered'}}); toast('Marked'); await loadPrayers(); }catch(e){ console.error(e); toast(e.error||'failed'); } }
+@app.route("/api/admin/attendance", methods=["POST"])
+@admin_required
+def admin_attendance():
+    j = request.get_json() or {}
+    date = j.get("date")
+    mid = j.get("id")
+    status = j.get("status")
+    if not date or not mid or status not in ("present", "absent"):
+        return jsonify({"ok": False, "error": "Invalid data"}), 400
+    data = load_data()
+    data["attendance"].setdefault(date, {})[mid] = {"status": status, "edited_at": now()}
+    save_data(data)
+    return jsonify({"ok": True})
 
-// ---------- ADMINS list/add ----------
-document.getElementById('btnAddAdmin').addEventListener('click', async ()=>{ const name=document.getElementById('newAdminName').value.trim(); const pass=document.getElementById('newAdminPass').value; if(!name||!pass) return toast('fill both'); try{ await api('/api/admin/add_admin',{method:'POST', body:{name, password: pass}}); document.getElementById('newAdminName').value=''; document.getElementById('newAdminPass').value=''; toast('admin added'); await loadAdmins(); }catch(e){ console.error(e); toast(e.error||'failed'); } });
-document.getElementById('btnListAdmins').addEventListener('click', loadAdmins);
-async function loadAdmins(){ try{ const j = await api('/api/admin/list_admins'); const el=document.getElementById('adminsList'); el.innerHTML = j.length? j.map(a=>`<div class="item"><div><div class="label">${escape(a.name)}</div><div class="muted">${escape(a.created_at||'')}</div></div></div>`).join('') : '<div class="muted">No admins</div>'; }catch(e){ console.warn(e); document.getElementById('adminsList').innerHTML = '<div class="muted">Unable to load admins</div>'; } }
+# ------------------ admin: content posting & editing (events, summons, bible, resources) ------------------
+# Staff/admin with 'post_content' can POST and PUT; DELETE requires admin
 
-// ---------- STAFF ----------
-document.getElementById('btnAddStaff').addEventListener('click', async ()=>{
-  const name = document.getElementById('staffName').value.trim();
-  const password = document.getElementById('staffPass').value;
-  const contact = document.getElementById('staffContact').value.trim();
-  const role = document.getElementById('staffRole').value;
-  const perms = {
-    reply_prayers: !!document.getElementById('perm_reply').checked,
-    view_members: !!document.getElementById('perm_view_members').checked,
-    add_donations: !!document.getElementById('perm_add_don').checked,
-    post_content: !!document.getElementById('perm_post_content').checked,
-    manage_finance: !!document.getElementById('perm_manage_finance').checked
-  };
-  if(!name || !password) return toast('name & password');
-  try{
-    await api('/api/admin/staff', { method:'POST', body:{ name, password, role, perms, contact } });
-    document.getElementById('staffName').value=''; document.getElementById('staffPass').value=''; document.getElementById('staffRole').value=''; document.getElementById('staffContact').value='';
-    ['perm_reply','perm_view_members','perm_add_don','perm_post_content','perm_manage_finance'].forEach(id=>document.getElementById(id).checked=false);
-    toast('Person added');
-    await loadStaff();
-  }catch(e){ console.error(e); toast(e.error||'failed'); }
-});
+def find_and_update(collection, item_id, updates):
+    data = load_data()
+    for item in data.get(collection, []):
+        if item.get("id") == item_id:
+            item.update(updates)
+            item["updated_at"] = now()
+            save_data(data)
+            return item
+    return None
 
-document.getElementById('btnListStaff').addEventListener('click', loadStaff);
+@app.route("/api/admin/<collection>", methods=["GET", "POST"])
+@staff_or_admin_allowed("post_content")
+def admin_collection_post(collection):
+    # allowed collections: events, summons, bible, resources
+    if collection not in ("events", "summons", "bible", "resources"):
+        return jsonify({"ok": False, "error": "Invalid collection"}), 400
+    data = load_data()
+    # GET returns collection items (staff/admin with post_content can view)
+    if request.method == "GET":
+        return jsonify(data.get(collection, []))
+    j = request.get_json() or {}
+    item = {"id": str(uuid.uuid4()), **j, "created_at": now()}
+    data[collection].insert(0, item)
+    save_data(data)
+    return jsonify({"ok": True, collection[:-1]: item})
 
-async function loadStaff(){
-  try{
-    const j = await api('/api/admin/staff');
-    const el = document.getElementById('staffList');
-    el.innerHTML = j.length? j.map(s=>{
-      const contact = s.contact? `\n<div class="muted small">contact: ${escape(s.contact)}</div>` : '';
-      const perms = Object.keys(s.perms||{}).filter(k=>s.perms[k]).join(', ') || 'none';
-      return `<div class="item"><div><div class="label">${escape(s.name)} ${s.role?` • ${escape(s.role)}`:''}</div><div class="muted small">perms: ${escape(perms)}</div>${contact}</div><div><button class="muted-btn" onclick="removeStaff('${s.id}')">Remove</button></div></div>`
-    }).join('') : '<div class="muted">No people added</div>';
-  }catch(e){ console.warn(e); document.getElementById('staffList').innerHTML = '<div class="muted">Unable to load</div>'; }
-}
-window.removeStaff = async function(id){
-  if(!confirm('Remove this person?')) return;
-  try{
-    await api('/api/admin/staff', { method:'DELETE', body:{ id }});
-    toast('Removed');
-    await loadStaff();
-  }catch(e){ console.error(e); toast(e.error||'failed'); }
-};
+# allow GET (fetch single item), PUT (edit), DELETE (admin only)
+@app.route("/api/admin/<collection>/<item_id>", methods=["GET", "PUT", "DELETE"])
+def admin_collection_modify(collection, item_id):
+    if collection not in ("events", "summons", "bible", "resources"):
+        return jsonify({"ok": False, "error": "Invalid collection"}), 400
 
-// ---------- modal helpers ----------
-function showModal(title, onSave){
-  const backdrop = document.getElementById('modalBackdrop');
-  document.getElementById('modalTitle').textContent = title;
-  backdrop.style.display = 'flex';
-  const cleanup = ()=>{
-    backdrop.style.display = 'none';
-    document.getElementById('modalBody').innerHTML = '';
-    document.getElementById('modalSave').onclick = null;
-    document.getElementById('modalCancel').onclick = null;
-  };
-  document.getElementById('modalCancel').onclick = ()=>{ cleanup(); };
-  document.getElementById('modalSave').onclick = async ()=>{
-    try{
-      const ok = await onSave();
-      if(ok) cleanup();
-    }catch(e){ console.error(e); cleanup(); }
-  };
-}
+    # GET: allow staff/admin with post_content to fetch single item for editing UI
+    if request.method == "GET":
+        @staff_or_admin_allowed("post_content")
+        def _get():
+            data = load_data()
+            for it in data.get(collection, []):
+                if it.get("id") == item_id:
+                    return jsonify(it)
+            return jsonify({"ok": False, "error": "Not found"}), 404
+        return _get()
 
-// ---------- startup & refresh ----------
-async function refreshAll(){ await Promise.allSettled([loadMembers(), loadAttendance(), loadAllContent(), loadPrayers(), loadDonations(), loadContributions(), loadAdmins(), loadStaff()]); }
+    # PUT allowed for staff with post_content
+    if request.method == "PUT":
+        @staff_or_admin_allowed("post_content")
+        def _put():
+            j = request.get_json() or {}
+            updates = {k: v for k, v in j.items() if k != "id"}
+            updated = find_and_update(collection, item_id, updates)
+            if not updated:
+                return jsonify({"ok": False, "error": "Not found"}), 404
+            return jsonify({"ok": True, collection[:-1]: updated})
+        return _put()
 
-async function init(){ 
-  try{
-    const r = await fetch('/api/admin/members', {credentials:'same-origin'});
-    if(r.status===200){
-      document.getElementById('authWrap').style.display='none';
-      document.getElementById('dashboard').classList.remove('hidden');
-      document.getElementById('logoutBtn').classList.remove('hidden');
-      await refreshAll();
-    } else {
-      document.getElementById('authWrap').style.display='block';
-      await boot();
+    # DELETE requires admin
+    if request.method == "DELETE":
+        @admin_required
+        def _del():
+            data = load_data()
+            data[collection] = [it for it in data.get(collection, []) if it.get("id") != item_id]
+            save_data(data)
+            return jsonify({"ok": True})
+        return _del()
+
+# ------------------ admin: donations (GET/POST/PUT/DELETE) ------------------
+
+@app.route("/api/admin/donations", methods=["GET", "POST"])
+@staff_or_admin_allowed("add_donations")
+def admin_donations():
+    data = load_data()
+    if request.method == "GET":
+        return jsonify(data["donations"])
+    j = request.get_json() or {}
+    name = (j.get("name") or "Anonymous").strip()
+    try:
+        amount = float(j.get("amount") or 0)
+    except Exception:
+        amount = 0
+    if amount <= 0:
+        return jsonify({"ok": False, "error": "Invalid amount"}), 400
+    rec = {"id": str(uuid.uuid4()), "name": name, "amount": amount, "created_at": now(), "note": j.get("note","")}
+    data["donations"].insert(0, rec)
+    save_data(data)
+    return jsonify({"ok": True, "donation": rec})
+
+@app.route("/api/admin/donations/<did>", methods=["PUT", "DELETE"])
+def admin_donation_modify(did):
+    if request.method == "PUT":
+        @staff_or_admin_allowed("add_donations")
+        def _put():
+            j = request.get_json() or {}
+            data = load_data()
+            for d in data["donations"]:
+                if d["id"] == did:
+                    d["name"] = j.get("name", d.get("name",""))
+                    try:
+                        if "amount" in j:
+                            d["amount"] = float(j.get("amount", d.get("amount",0)))
+                    except Exception:
+                        pass
+                    d["note"] = j.get("note", d.get("note",""))
+                    d["updated_at"] = now()
+                    save_data(data)
+                    return jsonify({"ok": True, "donation": d})
+            return jsonify({"ok": False, "error": "Not found"}), 404
+        return _put()
+    if request.method == "DELETE":
+        @admin_required
+        def _del():
+            data = load_data()
+            data["donations"] = [d for d in data["donations"] if d["id"] != did]
+            save_data(data)
+            return jsonify({"ok": True})
+        return _del()
+
+# ------------------ admin: contributions (tithes/offering/pledges) ------------------
+
+@app.route("/api/admin/contributions", methods=["GET", "POST"])
+@staff_or_admin_allowed("add_contributions")
+def admin_contributions():
+    data = load_data()
+    if request.method == "GET":
+        return jsonify(data["contributions"])
+    j = request.get_json() or {}
+    # expected fields: name, amount, category, date, note
+    name = (j.get("name") or "Anonymous").strip()
+    try:
+        amount = float(j.get("amount") or 0)
+    except Exception:
+        amount = 0
+    if amount <= 0:
+        return jsonify({"ok": False, "error": "Invalid amount"}), 400
+    rec = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "amount": amount,
+        "category": (j.get("category") or "").strip(),
+        "date": j.get("date") or now(),
+        "note": j.get("note",""),
+        "created_at": now()
     }
-  }catch(e){
-    document.getElementById('authWrap').style.display='block';
-    await boot();
-  }
-}
-init();
+    data["contributions"].insert(0, rec)
+    save_data(data)
+    return jsonify({"ok": True, "contribution": rec})
 
-</script>
-</body>
-</html>
+@app.route("/api/admin/contributions/<cid>", methods=["PUT", "DELETE"])
+def admin_contribution_modify(cid):
+    # PUT allowed for staff with add_contributions
+    if request.method == "PUT":
+        @staff_or_admin_allowed("add_contributions")
+        def _put():
+            j = request.get_json() or {}
+            data = load_data()
+            for c in data["contributions"]:
+                if c["id"] == cid:
+                    c["name"] = j.get("name", c.get("name",""))
+                    try:
+                        if "amount" in j:
+                            c["amount"] = float(j.get("amount", c.get("amount",0)))
+                    except Exception:
+                        pass
+                    c["category"] = j.get("category", c.get("category",""))
+                    c["date"] = j.get("date", c.get("date"))
+                    c["note"] = j.get("note", c.get("note",""))
+                    c["updated_at"] = now()
+                    save_data(data)
+                    return jsonify({"ok": True, "contribution": c})
+            return jsonify({"ok": False, "error": "Not found"}), 404
+        return _put()
+    # DELETE requires admin to avoid accidental removal by staff
+    if request.method == "DELETE":
+        @admin_required
+        def _del():
+            data = load_data()
+            data["contributions"] = [c for c in data["contributions"] if c["id"] != cid]
+            save_data(data)
+            return jsonify({"ok": True})
+        return _del()
+
+# ------------------ admin: prayer reply ------------------
+
+@app.route("/api/admin/prayers/<pid>/reply", methods=["POST"])
+@staff_or_admin_allowed("reply_prayers")
+def reply_prayer(pid):
+    j = request.get_json() or {}
+    reply = (j.get("reply") or "").strip()
+    data = load_data()
+    for p in data["prayers"]:
+        if p["id"] == pid:
+            p["reply"] = reply
+            p["status"] = "answered"
+            p["updated_at"] = now()
+            save_data(data)
+            return jsonify({"ok": True})
+    return jsonify({"ok": False, "error": "Not found"}), 404
+
+# ------------------ admin: staff management ------------------
+
+@app.route("/api/admin/staff", methods=["GET", "POST", "DELETE"])
+@admin_required
+def admin_staff():
+    data = load_data()
+    if request.method == "GET":
+        return jsonify([{"id": s["id"], "name": s["name"], "role": s.get("role",""), "perms": s.get("perms",{}), "contact": s.get("contact",""), "created_at": s.get("created_at")} for s in data.get("staff",[])] )
+    j = request.get_json() or {}
+    if request.method == "POST":
+        name = (j.get("name") or "").strip()
+        password = j.get("password") or ""
+        role = (j.get("role") or "").strip()
+        perms = j.get("perms") or {}
+        contact = (j.get("contact") or "").strip()
+        if not name or not password:
+            return jsonify({"ok": False, "error": "Name & password required"}), 400
+        staff = {"id": str(uuid.uuid4()), "name": name, "role": role, "perms": perms, "contact": contact, "pass_hash": generate_password_hash(password), "created_at": now()}
+        data.setdefault("staff", []).append(staff)
+        save_data(data)
+        return jsonify({"ok": True, "staff": {"id": staff["id"], "name": staff["name"], "role": staff["role"], "perms": staff["perms"], "contact": staff.get("contact","")}})
+    if request.method == "DELETE":
+        sid = j.get("id")
+        data["staff"] = [s for s in data.get("staff",[]) if s["id"] != sid]
+        save_data(data)
+        return jsonify({"ok": True})
+
+# ------------------ staff auth ------------------
+
+@app.route("/api/staff/login", methods=["POST"])
+def staff_login():
+    j = request.get_json() or {}
+    name = (j.get("name") or "").strip()
+    password = j.get("password") or ""
+    for s in load_data().get("staff", []):
+        if s["name"] == name and check_password_hash(s["pass_hash"], password):
+            session.clear()
+            session["staff_id"] = s["id"]
+            session["staff_name"] = s["name"]
+            return jsonify({"ok": True, "staff": {"id": s["id"], "name": s["name"], "role": s.get("role",""), "perms": s.get("perms",{}), "contact": s.get("contact","")}})
+    return jsonify({"ok": False, "error": "Invalid credentials"}), 401
+
+@app.route("/api/staff/logout", methods=["POST"])
+def staff_logout():
+    session.pop("staff_id", None)
+    session.pop("staff_name", None)
+    return jsonify({"ok": True})
+
+@app.route("/api/staff/me")
+def staff_me():
+    sid = session.get("staff_id")
+    if not sid:
+        return jsonify({"ok": False, "staff": None})
+    for s in load_data().get("staff",[]):
+        if s["id"] == sid:
+            return jsonify({"ok": True, "staff": {"id": s["id"], "name": s["name"], "role": s.get("role",""), "perms": s.get("perms",{}), "contact": s.get("contact","")}})
+    return jsonify({"ok": False, "staff": None})
+
+# ------------------ PULSE RECEIVER: new endpoint for breathe -> whoiam integration ------------------
+
+@app.route("/pulse_receiver", methods=["POST", "GET"])
+def pulse_receiver():
+    """
+    Receive an external pulse (from breathe).
+    - If PULSE_SECRET env var is set, require header X-PULSE-TOKEN or ?token=... to match.
+    - Stores the pulse in data['pulses'] and updates app.config['LAST_PINGS'] for quick visibility.
+    - Returns JSON {status, received_at}.
+    """
+    token = request.headers.get("X-PULSE-TOKEN") or request.args.get("token")
+    if PULSE_SECRET:
+        if not token or token != PULSE_SECRET:
+            app.logger.warning("pulse_receiver: unauthorized attempt from %s", request.remote_addr)
+            return jsonify({"status": "unauthorized"}), 401
+
+    payload = request.get_json(silent=True)
+    if payload is None:
+        payload = request.form.to_dict() or {"message": "ping"}
+
+    received_at = now()
+    # persist pulse to data store (GitHub-aware)
+    try:
+        data = load_data()
+        pulse = {
+            "id": str(uuid.uuid4()),
+            "source_ip": request.remote_addr or "unknown",
+            "headers": {k: v for k, v in request.headers.items()},
+            "payload": payload,
+            "received_at": received_at
+        }
+        # prepend so newest first
+        data.setdefault("pulses", [])
+        data["pulses"].insert(0, pulse)
+        # trim to last 200 entries to avoid runaway growth
+        if len(data["pulses"]) > 200:
+            data["pulses"] = data["pulses"][:200]
+        save_data(data)
+        # update quick in-memory last pings map
+        src = request.remote_addr or "unknown"
+        app.config["LAST_PINGS"][src] = {"ok": True, "at": received_at}
+        app.logger.info("pulse_receiver: received pulse from %s at %s", src, received_at)
+    except Exception as e:
+        app.logger.exception("pulse_receiver: failed to save pulse: %s", e)
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+    return jsonify({"status": "ok", "received_at": received_at}), 200
+
+# ------------------ health & keep-alive ------------------
+
+@app.route("/api/health")
+def api_health():
+    uptime = (datetime.datetime.utcnow() - START_TIME).total_seconds()
+    return jsonify({
+        "ok": True,
+        "uptime_seconds": int(uptime),
+        "github_sha": app.config.get("GITHUB_SHA"),
+        "last_github_status": app.config.get("LAST_GITHUB_STATUS"),
+        "keepalive_running": app.config.get("KEEPALIVE_RUNNING", False),
+        "last_pings": app.config.get("LAST_PINGS", {}),
+        "pulses_count": len(load_data().get("pulses", []))
+    })
+
+def keepalive_worker(self_url, monitors, interval_seconds):
+    """Background loop: ping self_url and extra monitors every interval_seconds."""
+    app.logger.info(f"keepalive_worker starting: self_url={self_url} monitors={monitors} interval={interval_seconds}s")
+    app.config["KEEPALIVE_RUNNING"] = True
+    session_req = requests.Session()
+    headers = {"User-Agent": "TomorrowAI-KeepAlive/1"}
+    targets = [self_url] + monitors
+    while True:
+        for t in targets:
+            try:
+                r = session_req.get(t, headers=headers, timeout=15)
+                app.config["LAST_PINGS"][t] = {"ok": r.status_code == 200, "status_code": r.status_code, "at": now()}
+                app.logger.debug(f"keepalive ping {t} -> {r.status_code}")
+            except Exception as e:
+                app.config["LAST_PINGS"][t] = {"ok": False, "error": str(e), "at": now()}
+                app.logger.warning(f"keepalive ping failed {t}: {e}")
+        time.sleep(interval_seconds)
+
+def start_keepalive_in_thread():
+    try:
+        enabled = os.getenv("KEEPALIVE_ENABLED", "1") == "1"
+        if not enabled:
+            app.logger.info("KEEPALIVE_ENABLED != 1 -> not starting keepalive.")
+            return
+        try:
+            interval = int(os.getenv("KEEPALIVE_INTERVAL", str(1200)))
+            if interval < 60:
+                interval = 60
+        except Exception:
+            interval = 1200
+        app_url = os.getenv("APP_URL")
+        port = int(os.getenv("PORT", "4001"))
+        if app_url:
+            self_url = app_url.rstrip("/") + "/"
+        else:
+            self_url = f"http://127.0.0.1:{port}/"
+        monitors_raw = os.getenv("UPTIME_MONITORS", "")
+        monitors = [m.strip() for m in monitors_raw.split(",") if m.strip()]
+        # If already started in this process, skip
+        if app.config.get("KEEPALIVE_STARTED"):
+            app.logger.info("Keepalive already started in this process.")
+            return
+        thr = threading.Thread(target=keepalive_worker, args=(self_url, monitors, interval), daemon=True)
+        thr.start()
+        app.config["KEEPALIVE_STARTED"] = True
+        app.logger.info("keepalive thread started.")
+    except Exception as e:
+        app.logger.warning(f"failed to start keepalive: {e}")
+
+# Use before_request guard so we don't rely on before_first_request (some Flask installs lack it)
+@app.before_request
+def _ensure_keepalive_started_on_first_request():
+    run_in_workers = os.getenv("RUN_KEEPALIVE_IN_WORKERS", "1") == "1"
+    if not run_in_workers:
+        return
+    if not app.config.get("KEEPALIVE_STARTED"):
+        start_keepalive_in_thread()
+
+# ------------------ start ------------------
+
+if __name__ == "__main__":
+    # ensure local DB exists or initialize from DEFAULT_DATA
+    if not LOCAL_DATA_FILE.exists():
+        save_data(DEFAULT_DATA.copy())
+    # try to prime from GitHub once at startup (best-effort)
+    if GITHUB_TOKEN and REPO:
+        db, sha = load_from_github()
+        if isinstance(db, dict):
+            try:
+                with open(LOCAL_DATA_FILE, "w", encoding="utf-8") as f:
+                    json.dump(db, f, indent=2, ensure_ascii=False)
+            except Exception:
+                pass
+            _GITHUB_SHA = sha
+            app.config["GITHUB_SHA"] = _GITHUB_SHA
+    port = int(os.getenv("PORT", 4001))
+    # start keepalive immediately when running directly
+    start_keepalive_in_thread()
+    app.run(host="0.0.0.0", port=port, debug=True)
