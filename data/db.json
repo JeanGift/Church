@@ -264,6 +264,34 @@
   "prayers": [],
   "pulses": [
     {
+      "id": "8acccef3-65f3-4696-8a2b-0c3be74e7ea0",
+      "source_ip": "127.0.0.1",
+      "headers": {
+        "Host": "church-i0im.onrender.com",
+        "User-Agent": "python-requests/2.32.5",
+        "Content-Length": "58",
+        "Accept": "*/*",
+        "Accept-Encoding": "gzip, br",
+        "Cdn-Loop": "cloudflare; loops=1",
+        "Cf-Connecting-Ip": "74.220.49.253",
+        "Cf-Ipcountry": "US",
+        "Cf-Ray": "9ced5365e9ab54bb-SEA",
+        "Cf-Visitor": "{\"scheme\":\"https\"}",
+        "Content-Type": "application/json",
+        "Render-Proxy-Ttl": "4",
+        "Rndr-Id": "a9440922-79d6-465d",
+        "True-Client-Ip": "74.220.49.253",
+        "X-Forwarded-For": "74.220.49.253, 172.71.151.74, 10.17.49.1",
+        "X-Forwarded-Proto": "https",
+        "X-Request-Start": "1771247852564011"
+      },
+      "payload": {
+        "source": "breathe",
+        "timestamp": "2026-02-16T13:17:31Z"
+      },
+      "received_at": "2026-02-16T13:17:32.564620Z"
+    },
+    {
       "id": "b99e7787-2eea-46dc-8572-d2e7ce971132",
       "source_ip": "127.0.0.1",
       "headers": {
@@ -5834,34 +5862,6 @@
         "timestamp": "2026-02-16T11:23:09Z"
       },
       "received_at": "2026-02-16T11:23:10.904517Z"
-    },
-    {
-      "id": "9031d202-14cd-4f0b-906f-d79dfca7da0d",
-      "source_ip": "127.0.0.1",
-      "headers": {
-        "Host": "church-i0im.onrender.com",
-        "User-Agent": "python-requests/2.32.5",
-        "Content-Length": "58",
-        "Accept": "*/*",
-        "Accept-Encoding": "gzip, br",
-        "Cdn-Loop": "cloudflare; loops=1",
-        "Cf-Connecting-Ip": "74.220.49.253",
-        "Cf-Ipcountry": "US",
-        "Cf-Ray": "9cecab0468dd54bb-SEA",
-        "Cf-Visitor": "{\"scheme\":\"https\"}",
-        "Content-Type": "application/json",
-        "Render-Proxy-Ttl": "4",
-        "Rndr-Id": "1d739597-97b3-48a8",
-        "True-Client-Ip": "74.220.49.253",
-        "X-Forwarded-For": "74.220.49.253, 172.71.151.188, 10.22.254.132",
-        "X-Forwarded-Proto": "https",
-        "X-Request-Start": "1771240955661497"
-      },
-      "payload": {
-        "source": "breathe",
-        "timestamp": "2026-02-16T11:22:34Z"
-      },
-      "received_at": "2026-02-16T11:22:35.660848Z"
     }
   ]
 }
